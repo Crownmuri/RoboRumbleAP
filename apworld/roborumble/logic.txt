@@ -1,0 +1,254 @@
+# RoboRumble mission logic: what you need before logic sends you into a mission.
+#
+# First draft from the Steam walkthrough by m00f (steamcommunity.com/sharedfiles/filedetails/?id=779093375).
+# Edit freely; the apworld reads this file when a seed is generated and stops with the line number if
+# something is written wrong.
+#
+# How to write it:
+#   == Red Star Mission 1 ==     starts a mission (Red Star or Terraflux, 1-16)
+#   base: no                     the mission has no factory (nothing can be built there, so it gives no
+#                                build checks). Leave the line out when there is one.
+#   need: A | B                  one requirement: A or B. Every "need" line of a mission must be met.
+#   need: A & B | C              "&" ties things together: (A and B) or C
+#   recommended: ...             like "need", but only with logic_strictness: normal (left out with relaxed)
+#   # ...                        a comment
+#
+# Names: any weapon, legs, booster, base upgrade or invention by its item name (upper/lower case doesn't
+# matter). "2-Legs" means the side's own 2-Legs. Some shortcuts:
+#   damage weapon      any weapon of the side that does damage (not Oiler, Nitrogrenade or Disrupter)
+#   any weapon / any legs
+#   2 damage weapons   a number in front asks for that many different ones (works for all three shortcuts)
+#
+# Red Star weapons: Chain Gun, Rocket Launcher, Homing Missile, Mine Spreader, Oiler, Magneton, Force Field, Nuke
+# Red Star legs:    2-Legs A, Heavy 4-Legs, Kangaroo, Caterpillar, 4-Tires, Amphibian, Propeller, Snail
+# Terraflux weapons: Laser, Pulse Gun, Eraser, Buzzer, Nitrogrenade, Disrupter, Whirlwind, Infector
+# Terraflux legs:    2-Legs B, Teleporter, Jet-Pack, Spider Legs, Jet-Car, Hovercraft, Antigraviton, Cube
+# Boosters: Speed Booster, Turn Speed Booster, Fire Power Booster, Fire Range Booster, Fire Frequency Booster,
+#           Shield, Camouflage, Maximum Weapon Booster, Maximum Defense Booster
+# Base upgrades: Faster Production, Cheaper Production, Base Energy +10%, Base Regeneration,
+#                Stronger Energy Explosions, Wider Energy Explosions, Explosions Recharge Robos,
+#                Enemy Explosions Spare 1%
+# Inventions: Robo Intelligence Enhancer, Robo Spawn Protection, Robo Auto-Repair
+
+
+# ======================================================================== RED STAR
+
+== Red Star Mission 1 ==
+# The enemy waits until you come close. Guide: 5x Rocket Launcher with Shield or Fire Frequency.
+need: damage weapon
+recommended: Rocket Launcher | Chain Gun
+
+== Red Star Mission 2 ==
+# Destroy the base. Guide: 1x Rocket Launcher/Speed sneaks to the base, 3x Homing Missile/Shield defend.
+need: Rocket Launcher | Homing Missile
+recommended: Speed Booster | Shield
+
+== Red Star Mission 3 ==
+# Only one robo type allowed; steal the alien boosters. Guide: 5x Rocket Launcher/2-Legs/Speed.
+need: Rocket Launcher | Homing Missile
+recommended: Speed Booster
+recommended: Faster Production
+
+== Red Star Mission 4 ==
+# Destroy the whole convoy, spare the prototype. Guide: enough Mine Spreaders; something cheap to set mines off.
+need: Mine Spreader
+recommended: Chain Gun | Homing Missile
+
+== Red Star Mission 5 ==
+# Break a strong coastal line; the enemy never attacks. Guide: Chain Guns, Mine Spreaders/4-Legs/Shield,
+# Mine Spreaders or Magnetons across the water, Homing Missiles or Rocket Launchers for the base.
+need: Mine Spreader | Magneton
+need: Rocket Launcher | Homing Missile
+recommended: Chain Gun
+recommended: Heavy 4-Legs
+
+== Red Star Mission 6 ==
+# $550: only time for one robo. Guide: Homing Missile or Rocket Launcher/4-Legs/Maximum Weapon Booster,
+# collect the two alien boosters.
+need: Rocket Launcher | Homing Missile
+recommended: Maximum Weapon Booster | Fire Power Booster
+recommended: Heavy 4-Legs
+
+== Red Star Mission 7 ==
+# Two enemy bases, the second behind a locked door. Guide: 4x Rocket Launcher/4-Tires/Speed, then Mine
+# Spreaders/Magnetons/Chain Guns/Rocket Launchers against the onslaught.
+need: Rocket Launcher | Homing Missile
+need: Mine Spreader | Magneton | Chain Gun
+recommended: 4-Tires
+recommended: Speed Booster
+
+== Red Star Mission 8 ==
+# Guide: a blocker (Oiler/Caterpillar/Maximum Defense) and 2x Homing Missile/4-Tires/Maximum Weapon Booster.
+need: Homing Missile | Rocket Launcher
+recommended: Oiler & Caterpillar
+recommended: Maximum Weapon Booster | Fire Power Booster
+
+== Red Star Mission 9 ==
+# The enemy builds robos with alien boosters. Guide: 1x Homing Missile/4-Legs/Maximum Weapon collects the
+# alien boosters; Oilers, Mine Spreaders, Rocket Launchers and Homing Missiles defend; buy base regeneration.
+need: Homing Missile
+need: Mine Spreader | Rocket Launcher | Oiler
+recommended: Maximum Weapon Booster
+recommended: Base Regeneration | Base Energy +10%
+
+== Red Star Mission 10 ==
+# Floating fortress, endless hovercraft attacks. Guide: Force Fields through the fortress' openings
+# (Force Field/Caterpillar/Maximum Defense + Force Field/Amphibian/Speed), Homing Missile/Amphibian/Maximum Weapon.
+need: Force Field | Homing Missile
+recommended: Force Field & Amphibian
+recommended: Caterpillar
+recommended: Maximum Defense Booster | Maximum Weapon Booster
+
+== Red Star Mission 11 ==
+# Three bases sending "indestructible" cubes. Guide: 3x Rocket Launcher/4-Tires/Speed on the switches,
+# Mine Spreader/4-Tires/Speed against the cubes, a cheap Chain Gun to set the mines off.
+need: Rocket Launcher | Homing Missile
+need: Mine Spreader | Chain Gun
+recommended: 4-Tires
+recommended: Speed Booster
+
+== Red Star Mission 12 ==
+# No money: herd the fleeing enemies into the Force Field you are given.
+base: no
+
+== Red Star Mission 13 ==
+# Guide: 3x Nuke/4-Tires/Speed blow up the Erasers, 4x Force Field/4-Tires/Speed cut through the base.
+need: Force Field
+need: Nuke | Homing Missile
+recommended: 4-Tires
+recommended: Speed Booster
+
+== Red Star Mission 14 ==
+# Guide: 4x Force Field/4-Tires/Speed, lay a Force Field through the base.
+need: Force Field
+recommended: 4-Tires
+recommended: Speed Booster
+
+== Red Star Mission 15 ==
+# Guide: 6x Force Field/4-Tires/Maximum Defense, attack in pairs, block the switch behind the wall,
+# Mine Spreaders for the rest.
+need: Force Field
+need: Mine Spreader | Chain Gun | Rocket Launcher
+recommended: Maximum Defense Booster
+recommended: 4-Tires
+
+== Red Star Mission 16 ==
+# The aliens. Not in the walkthrough for Red Star (it describes the Terraflux way with Nitrogrenades):
+# a guess, please check. 5 robos have to hold the big switch, a 6th goes through the last door.
+need: 2 damage weapons
+recommended: Oiler | Magneton
+recommended: Speed Booster | Maximum Defense Booster
+
+
+# ======================================================================== TERRAFLUX
+
+== Terraflux Mission 1 ==
+# Kill every enemy robo. Guide: 1x Laser lures the Homing Missiles out, 6x Eraser/Fire Frequency wait at the
+# corridor.
+need: damage weapon
+recommended: Eraser | Laser
+
+== Terraflux Mission 2 ==
+# Chain Guns from the right, Homing Missiles from the center. Guide: 6+ Pulse Gun/Fire Frequency and a Laser.
+need: Pulse Gun | Laser
+recommended: Pulse Gun
+recommended: Fire Frequency Booster | Shield
+
+== Terraflux Mission 3 ==
+# The base is under fire at once. Guide: Pulse Gun/2-Legs/Fire Range ("must have"), faster and cheaper
+# production.
+need: Pulse Gun | Laser | Eraser
+need: Fire Range Booster
+recommended: Faster Production | Cheaper Production
+
+== Terraflux Mission 4 ==
+# The enemy base is behind a door opened by a switch; Kangaroos come over the pipes. Guide: 2x Buzzer/Spider
+# and 2x Pulse Gun/Spider with Maximum Defense, 2x Pulse Gun/2-Legs, crush them in the door.
+need: Pulse Gun
+recommended: Buzzer
+recommended: Spider Legs
+recommended: Maximum Defense Booster
+recommended: Cheaper Production
+
+== Terraflux Mission 5 ==
+# Two enemy bases. Guide: 3x Pulse Gun/Spider/Maximum Defense attack, 2x Buzzer/Spider/Range (or a
+# Nitrogrenade) defend.
+need: Pulse Gun
+need: Buzzer | Nitrogrenade
+recommended: Spider Legs
+recommended: Maximum Defense Booster
+
+== Terraflux Mission 6 ==
+# $550 and three Rocket Launchers already destroying your base: one robo. Guide: Pulse Gun/Jet-Car/Maximum
+# Defense, collect the three alien boosters.
+need: Pulse Gun | Laser
+recommended: Jet-Car
+recommended: Maximum Defense Booster
+
+== Terraflux Mission 7 ==
+# Guide: 4x Pulse Gun/Jet-Car/Maximum Defense collect the 4 alien weapon boosters and shoot the spawning
+# enemies; base energy +10% and regeneration.
+need: Pulse Gun
+recommended: Jet-Car
+recommended: Maximum Defense Booster
+recommended: Base Energy +10% | Base Regeneration
+
+== Terraflux Mission 8 ==
+# Two Homing Missiles attack. Guide: 1x Disrupter/Jet-Car/Speed catches them, 3x Buzzer/Spider/Maximum
+# Defense attack through the tunnels.
+need: Buzzer | Pulse Gun
+recommended: Disrupter
+recommended: Spider Legs
+
+== Terraflux Mission 9 ==
+# Guide: waves of 2x Buzzer/Teleporter/Maximum Defense jump right into the base; take the switch before the
+# train hits your base again.
+need: Buzzer | Pulse Gun
+need: Teleporter | Jet-Pack
+recommended: Maximum Defense Booster
+recommended: Nitrogrenade | Disrupter
+
+== Terraflux Mission 10 ==
+# Guide: Pulse Gun/Teleporter/Maximum Defense jump into a 1-tile gap in the base's force field; keep
+# Nitrogrenades home against Rocket Launchers.
+need: Pulse Gun | Buzzer
+need: Teleporter | Jet-Pack
+recommended: Nitrogrenade
+recommended: Maximum Defense Booster
+
+== Terraflux Mission 11 ==
+# No money: storm the castle with the robos you are given. Guide: buy the inventions before, Auto-Repair
+# helps a lot here and in the next mission.
+base: no
+recommended: Robo Auto-Repair
+
+== Terraflux Mission 12 ==
+# No money, one robo: lure the Chain Guns into the acid, then shoot the base.
+base: no
+recommended: Robo Auto-Repair
+
+== Terraflux Mission 13 ==
+# Stop the convoy before it reaches the exit. Guide: 3-4x Disrupter/Hovercraft/Speed, Nitrogrenades, one weapon.
+need: Disrupter | Nitrogrenade
+need: damage weapon
+recommended: Hovercraft | Jet-Car
+recommended: Speed Booster
+
+== Terraflux Mission 14 ==
+# Your army is locked in. Guide: build 1 Jet-Pack/Speed robo and jump into the area with the switch.
+need: Jet-Pack | Teleporter
+
+== Terraflux Mission 15 ==
+# Guide: Infector/Jet-Car/Camouflage (or Speed) straight to the base, kill teams of Disrupter/Nitrogrenade/Laser.
+need: Infector
+need: Disrupter | Nitrogrenade
+recommended: Laser | Pulse Gun
+recommended: Jet-Car
+recommended: Camouflage | Speed Booster
+
+== Terraflux Mission 16 ==
+# The aliens. Guide: 6x Nitrogrenade/Jet-Car/Maximum Defense (or Speed); freeze the leading alien on the big
+# switch, 5 robos hold the switch in the room, the 6th goes through the last door.
+need: Nitrogrenade
+recommended: Jet-Car
+recommended: Maximum Defense Booster | Speed Booster

@@ -5,7 +5,7 @@ import settings
 from BaseClasses import CollectionState, Item, ItemClassification, Location, Region, Tutorial
 from worlds.AutoWorld import WebWorld, World
 
-from . import data
+from . import data, logic
 from .options import RoboRumbleOptions
 
 SLOT_DATA_OPTIONS = (
@@ -101,6 +101,12 @@ class RoboRumbleWorld(World):
     start_legs: List[str]
 
     def generate_early(self) -> None:
+        self.mission_logic = logic.load()
+        # what logic asks for has to be progression (upgrades and inventions are only useful otherwise)
+        relaxed = self.options.logic_strictness == "relaxed"
+        self.logic_items = {term for rules in self.mission_logic.values()
+                            for need in (rules.need if relaxed else rules.need + rules.recommended)
+                            for option in need for term in option if isinstance(term, str)}
         passthrough: Dict[str, Any] = getattr(self.multiworld, "re_gen_passthrough", {}).get(self.game, {})
         for option_name in SLOT_DATA_OPTIONS:
             if option_name in passthrough:
@@ -132,7 +138,7 @@ class RoboRumbleWorld(World):
             classification = ItemClassification.filler
         elif name in data.TRAPS.values():
             classification = ItemClassification.trap
-        elif name in data.UPGRADES or name in data.INVENTIONS:
+        elif (name in data.UPGRADES or name in data.INVENTIONS) and name not in getattr(self, "logic_items", ()):
             classification = ItemClassification.useful
         elif name == data.ARTIFACT:
             classification = ItemClassification.progression_skip_balancing
@@ -170,6 +176,15 @@ class RoboRumbleWorld(World):
             pool += [self.create_item(data.ARTIFACT) for _ in range(artifacts)]
 
         missing = len(self.multiworld.get_unfilled_locations(self.player)) - len(pool)
+        if missing < 0:
+            # few checks turned on: items that are only useful are given at the start instead
+            for item in [i for i in pool if i.classification == ItemClassification.useful][:-missing]:
+                pool.remove(item)
+                self.multiworld.push_precollected(item)
+                missing += 1
+        if missing < 0:
+            raise Exception(f"RoboRumble ({self.player_name}): {-missing} more items than checks; "
+                            "turn on shop_checks, booster_builds, spy_checks or combo_builds")
         weights = [self.options.oil_trap_weight.value, self.options.freeze_trap_weight.value,
                    self.options.disruptor_trap_weight.value, self.options.mine_trap_weight.value,
                    self.options.nuke_trap_weight.value]
@@ -225,16 +240,16 @@ class RoboRumbleWorld(World):
 
     # ---------------------------------------------------------------- logic
     def has_parts(self, state: CollectionState, side: int, mission: int) -> bool:
-        """Loose for now: about as many weapons and legs as the original game offers in that mission."""
-        heads, legs = data.vanilla_counts(side, mission)
-        if self.options.logic_strictness == "relaxed":
-            heads, legs = max(1, heads // 2), max(1, legs // 2)
-        else:
-            heads, legs = max(1, heads - 1), max(1, legs - 1)
-        # weapons that do no damage on their own (Oiler, Nitrogrenade) don't count
-        heads = min(heads, len(data.side_attack_heads(side)))
-        return (state.has_from_list(data.side_attack_heads(side), self.player, heads)
-                and state.has_from_list(data.side_legs(side), self.player, legs))
+        """What logic.txt asks for that mission ("recommended" lines only with normal strictness)."""
+        rules = self.mission_logic.get((side, mission))
+        if rules is None:
+            return True
+        needs = rules.need if self.options.logic_strictness == "relaxed" else rules.need + rules.recommended
+        return all(logic.met(state, self.player, side, need) for need in needs)
+
+    def has_base(self, side: int, mission: int) -> bool:
+        rules = self.mission_logic.get((side, mission))
+        return rules is None or rules.base
 
     def mission_open(self, state: CollectionState, side: int, mission: int) -> bool:
         if mission == data.FINAL_MISSION and self.options.goal == "set_missions_and_final_mission":
@@ -250,8 +265,8 @@ class RoboRumbleWorld(World):
         return self.mission_open(state, side, mission) and self.has_parts(state, side, mission)
 
     def side_reachable(self, state: CollectionState, side: int) -> bool:
-        """Some mission of that side can be played (builds happen in missions)."""
-        return any(self.mission_open(state, side, n) for n in range(1, data.FINAL_MISSION))
+        """Some mission of that side with a factory is open (builds happen in missions)."""
+        return any(self.mission_open(state, side, n) for n in range(1, data.FINAL_MISSION) if self.has_base(side, n))
 
     def missions_open(self, state: CollectionState, count: int) -> bool:
         """At least `count` missions besides the first are unlocked, on any side."""

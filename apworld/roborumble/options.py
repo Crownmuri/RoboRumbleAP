@@ -91,9 +91,10 @@ class FinalMissionWins(Range):
 
 class LogicStrictness(Choice):
     """
-    How many weapons and legs logic expects before a mission.
-    normal: one less than the original game offers in that mission.
-    relaxed: half of what the original game offers.
+    What logic expects you to have before a mission (the "need" and "recommended" lines of the apworld's
+    logic.txt, written from a community walkthrough).
+    normal: what the walkthrough uses ("need" and "recommended").
+    relaxed: only the bare minimum ("need").
     """
     display_name = "Logic Strictness"
     option_normal = 0
