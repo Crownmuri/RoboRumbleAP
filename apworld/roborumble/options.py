@@ -62,6 +62,44 @@ class ComboBuilds(Toggle):
     display_name = "Combo Builds"
 
 
+class ShopChecks(DefaultOnToggle):
+    """
+    Every purchase from the engineer between missions is a check: the 9 boosters, the 8 base enhancements and the
+    3 secret inventions. What you get is decided by the items you receive instead.
+    """
+    display_name = "Shop Checks"
+
+
+class SpyChecks(Choice):
+    """
+    The spy's report on the enemy, which can be bought once before each mission.
+    off: no check.
+    check: buying it is a check.
+    check_and_hint: buying it is a check and also hints one of your items from the multiworld.
+    """
+    display_name = "Spy Checks"
+    option_off = 0
+    option_check = 1
+    option_check_and_hint = 2
+    default = 1
+
+
+class AlienArtifacts(Range):
+    """How many Alien Artifacts are needed before the final mission counts as the goal. 0 = none in the pool."""
+    display_name = "Alien Artifacts Required"
+    range_start = 0
+    range_end = 20
+    default = 0
+
+
+class ExtraArtifacts(Range):
+    """How many Alien Artifacts are in the pool beyond the required ones."""
+    display_name = "Extra Alien Artifacts"
+    range_start = 0
+    range_end = 10
+    default = 2
+
+
 @dataclass
 class RoboRumbleOptions(PerGameCommonOptions):
     side: Side
@@ -70,4 +108,8 @@ class RoboRumbleOptions(PerGameCommonOptions):
     logic_strictness: LogicStrictness
     booster_builds: BoosterBuilds
     combo_builds: ComboBuilds
+    shop_checks: ShopChecks
+    spy_checks: SpyChecks
+    alien_artifacts: AlienArtifacts
+    extra_artifacts: ExtraArtifacts
     death_link: DeathLink

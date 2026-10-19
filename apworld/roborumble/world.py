@@ -6,7 +6,8 @@ from worlds.AutoWorld import WebWorld, World
 from . import data
 from .options import RoboRumbleOptions
 
-SLOT_DATA_OPTIONS = ("side", "starting_parts", "open_missions", "logic_strictness", "booster_builds", "combo_builds", "death_link")
+SLOT_DATA_OPTIONS = ("side", "starting_parts", "open_missions", "logic_strictness", "booster_builds", "combo_builds", "shop_checks", "spy_checks",
+                     "alien_artifacts", "extra_artifacts", "death_link")
 
 VICTORY = "Victory"
 
@@ -51,6 +52,8 @@ class RoboRumbleWorld(World):
         "Weapons": set(data.HEADS),
         "Legs": set(data.LEGS),
         "Boosters": set(data.BOOSTERS),
+        "Base Upgrades": set(data.UPGRADES),
+        "Inventions": set(data.INVENTIONS),
         "Mission Access": {data.mission_access(n) for n in range(2, data.MISSIONS + 1)},
     }
     location_name_groups = {
@@ -58,6 +61,9 @@ class RoboRumbleWorld(World):
         "Builds": {data.build_head(n) for n in data.HEADS} | {data.build_legs(n) for n in data.LEGS},
         "Booster Builds": {data.build_booster(n) for n in data.BOOSTERS},
         "Combo Builds": set(data.side_combos(0) + data.side_combos(1)),
+        "Shop": {data.shop_booster(n) for n in data.BOOSTERS} | {data.shop_upgrade(n) for n in data.UPGRADES}
+        | {data.shop_invention(n) for n in data.INVENTIONS},
+        "Spy Reports": {data.spy_hint(n) for n in range(1, data.MISSIONS + 1)},
     }
 
     ut_can_gen_without_yaml = True
@@ -86,12 +92,16 @@ class RoboRumbleWorld(World):
     def create_item(self, name: str) -> RoboRumbleItem:
         if name in data.FILLER.values():
             classification = ItemClassification.filler
+        elif name in data.UPGRADES or name in data.INVENTIONS:
+            classification = ItemClassification.useful
+        elif name == data.ARTIFACT:
+            classification = ItemClassification.progression_skip_balancing
         else:
             classification = ItemClassification.progression
         return RoboRumbleItem(name, classification, self.item_name_to_id[name], self.player)
 
     def get_filler_item_name(self) -> str:
-        return "Extra Funds"
+        return self.random.choice(list(data.FILLER.values()))
 
     def open_mission_numbers(self) -> range:
         return range(2, self.options.open_missions.value + 1)
@@ -110,6 +120,11 @@ class RoboRumbleWorld(World):
             pool.append(self.create_item(name))
         for number in range(self.options.open_missions.value + 1, data.MISSIONS + 1):
             pool.append(self.create_item(data.mission_access(number)))
+        for name in data.UPGRADES + data.INVENTIONS:
+            pool.append(self.create_item(name))
+        if self.options.alien_artifacts:
+            artifacts = self.options.alien_artifacts.value + self.options.extra_artifacts.value
+            pool += [self.create_item(data.ARTIFACT) for _ in range(artifacts)]
 
         missing = len(self.multiworld.get_unfilled_locations(self.player)) - len(pool)
         pool += [self.create_item(self.get_filler_item_name()) for _ in range(missing)]
@@ -129,6 +144,12 @@ class RoboRumbleWorld(World):
             names += [data.build_booster(n) for n in data.BOOSTERS]
         if self.options.combo_builds:
             names += data.side_combos(self.side)
+        if self.options.shop_checks:
+            names += [data.shop_booster(n) for n in data.BOOSTERS]
+            names += [data.shop_upgrade(n) for n in data.UPGRADES]
+            names += [data.shop_invention(n) for n in data.INVENTIONS]
+        if self.options.spy_checks:
+            names += [data.spy_hint(n) for n in range(1, data.MISSIONS + 1)]
         campaign.add_locations({name: self.location_name_to_id[name] for name in names}, RoboRumbleLocation)
 
         goal = RoboRumbleLocation(self.player, "Defeat the Aliens", None, campaign)
@@ -148,12 +169,30 @@ class RoboRumbleWorld(World):
         return (state.has_from_list(data.side_heads(self.side), self.player, heads)
                 and state.has_from_list(data.side_legs(self.side), self.player, legs))
 
+    def missions_open(self, state: CollectionState, count: int) -> bool:
+        """At least `count` missions besides the first are unlocked."""
+        return state.has_group("Mission Access", self.player, count)
+
     def set_rules(self) -> None:
         player = self.player
         for number in range(1, data.MISSIONS + 1):
             self.get_location(data.mission_complete(number)).access_rule = (
                 lambda state, n=number: self.can_play(state, n))
-        self.get_location("Defeat the Aliens").access_rule = lambda state: self.can_play(state, data.MISSIONS)
+        artifacts = self.options.alien_artifacts.value
+        self.get_location("Defeat the Aliens").access_rule = (
+            lambda state: self.can_play(state, data.MISSIONS) and state.has(data.ARTIFACT, player, artifacts))
+        if self.options.shop_checks:
+            # Shop money comes from won missions; loosely: the dearer goods after a few missions are open
+            for name in data.BOOSTERS:
+                self.get_location(data.shop_booster(name)).access_rule = lambda state: self.missions_open(state, 1)
+            for name in data.UPGRADES:
+                self.get_location(data.shop_upgrade(name)).access_rule = lambda state: self.missions_open(state, 3)
+            for name in data.INVENTIONS:
+                self.get_location(data.shop_invention(name)).access_rule = lambda state: self.missions_open(state, 5)
+        if self.options.spy_checks:
+            for number in range(2, data.MISSIONS + 1):
+                self.get_location(data.spy_hint(number)).access_rule = (
+                    lambda state, n=number: state.has(data.mission_access(n), player))
         for name in data.side_heads(self.side):
             self.get_location(data.build_head(name)).access_rule = lambda state, n=name: state.has(n, player)
         for name in data.side_legs(self.side):

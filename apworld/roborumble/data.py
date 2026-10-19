@@ -9,7 +9,14 @@ table:
     mission access   MISSION_OFFSET + mission number 2-16 (item)
     mission complete MISSION_OFFSET + mission number 1-16 (location)
     combo build      COMBO_OFFSET + head index * 16 + legs index (location, option combo_builds)
+    base upgrades    UPGRADE_OFFSET + index 0-7 (item; order of the engineer's menu)
+    inventions       INVENTION_OFFSET + index 0-2 (item)
+    shop purchases   SHOP_OFFSET + booster index 0-8, + 100 + upgrade index, + 200 + invention index (locations)
+    spy hints        SPY_OFFSET + mission number 1-16 (location: buying the spy's report before that mission)
 The "Build" locations use the same ids as the part items they belong to.
+
+The game's save state (devui: state block S) keeps 22 "available" and 22 "owned" flags for the shop:
+9 boosters, 10 base upgrade slots, 3 secret inventions.
 """
 from typing import Dict, List, Tuple
 
@@ -21,6 +28,11 @@ BOOSTER_OFFSET = 3000
 MISSION_OFFSET = 4000
 FILLER_OFFSET = 5000
 COMBO_OFFSET = 6000
+SHOP_OFFSET = 7000
+SPY_OFFSET = 7300
+UPGRADE_OFFSET = 3100
+INVENTION_OFFSET = 3200
+ARTIFACT_ID = 5100
 
 MISSIONS = 16
 
@@ -35,14 +47,29 @@ LEGS: Tuple[str, ...] = (
     "2-Legs A", "Heavy 4-Legs", "Kangaroo", "Caterpillar", "4-Tires", "Amphibian", "Propeller", "Snail",
     "2-Legs B", "Teleporter", "Jet-Pack", "Spider Legs", "Jet-Car", "Hovercraft", "Antigraviton", "Cube",
 )
-# Order of the Boosters mask; the last three are pick-two-of-three in the robot builder.
+# Order of the Boosters mask and of the shop's booster slots (nls\lang.ini 732-740). In the original game
+# Maximum Weapon needs Fire Power + Fire Range + Fire Frequency, Maximum Defense needs Speed + Turn Speed + Shield,
+# and Camouflage excludes both Maximum boosters (pick two of three).
 BOOSTERS: Tuple[str, ...] = (
     "Speed Booster", "Turn Speed Booster", "Fire Power Booster", "Fire Range Booster", "Fire Frequency Booster",
-    "Shield", "Camouflage", "Maximum Defense Booster", "Maximum Weapon Booster",
+    "Shield", "Camouflage", "Maximum Weapon Booster", "Maximum Defense Booster",
 )
+# The engineer's "base enhancement" menu (nls\lang.ini 770-777)
+UPGRADES: Tuple[str, ...] = (
+    "Faster Production", "Cheaper Production", "Base Energy +10%", "Base Regeneration",
+    "Stronger Energy Explosions", "Wider Energy Explosions", "Explosions Recharge Robos", "Enemy Explosions Spare 1%",
+)
+# The engineer's secret inventions
+INVENTIONS: Tuple[str, ...] = (
+    "Robo Intelligence Enhancer",   # robos target the enemy with the least energy first
+    "Robo Spawn Protection",        # indestructible for 10 s after production
+    "Robo Auto-Repair",             # energy refills after a minute without being shot
+)
+ARTIFACT = "Alien Artifact"
 
 FILLER: Dict[int, str] = {
-    FILLER_OFFSET + 1: "Extra Funds",
+    FILLER_OFFSET + 1: "Mission Funds Bonus",   # more starting funds in the next mission
+    FILLER_OFFSET + 2: "Shop Money",            # money to spend in the shop between missions
 }
 
 # What each campaign mission lets you build in the original game ('+' = available), per side, taken from the
@@ -97,6 +124,22 @@ def side_combos(side: int) -> List[str]:
     return [build_combo(h, l) for h in side_heads(side) for l in side_legs(side)]
 
 
+def shop_booster(name: str) -> str:
+    return f"Shop: {name}"
+
+
+def shop_upgrade(name: str) -> str:
+    return f"Shop: {name}"
+
+
+def shop_invention(name: str) -> str:
+    return f"Shop: {name}"
+
+
+def spy_hint(number: int) -> str:
+    return f"Spy Report Before Mission {number}"
+
+
 def starting_parts(side: int) -> Tuple[List[str], List[str]]:
     """The heads and legs the first mission of a side gives in the original game."""
     heads = [side_heads(side)[i] for i, c in enumerate(VANILLA_HEADS[side][0]) if c == "+"]
@@ -119,6 +162,11 @@ def item_table() -> Dict[str, int]:
         table[name] = BOOSTER_OFFSET + i
     for number in range(2, MISSIONS + 1):
         table[mission_access(number)] = MISSION_OFFSET + number
+    for i, name in enumerate(UPGRADES):
+        table[name] = UPGRADE_OFFSET + i
+    for i, name in enumerate(INVENTIONS):
+        table[name] = INVENTION_OFFSET + i
+    table[ARTIFACT] = ARTIFACT_ID
     for item_id, name in FILLER.items():
         table[name] = item_id
     return table
@@ -138,4 +186,12 @@ def location_table() -> Dict[str, int]:
         for l, legs in enumerate(LEGS):
             if h // 8 == l // 8:
                 table[build_combo(head, legs)] = COMBO_OFFSET + h * 16 + l
+    for i, name in enumerate(BOOSTERS):
+        table[shop_booster(name)] = SHOP_OFFSET + i
+    for i, name in enumerate(UPGRADES):
+        table[shop_upgrade(name)] = SHOP_OFFSET + 100 + i
+    for i, name in enumerate(INVENTIONS):
+        table[shop_invention(name)] = SHOP_OFFSET + 200 + i
+    for number in range(1, MISSIONS + 1):
+        table[spy_hint(number)] = SPY_OFFSET + number
     return table
