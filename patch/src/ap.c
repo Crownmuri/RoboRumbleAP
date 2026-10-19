@@ -295,15 +295,15 @@ static int side_has_open_mission(int side)
     return 0;
 }
 
-/* The mission to play: the one picked in the menu, else the game's own next mission if it is unlocked (also a won
-   one: a replay). Right after a win whose next mission is locked: the won mission again, so you pick the next one
-   in the menu yourself. Otherwise the first unlocked mission not won yet. */
+/* The mission to play: the one picked in the menu; right after a win the won mission again (the game doesn't move on
+   by itself, you pick the next one in the menu); else the game's current mission if it is unlocked (a loaded save),
+   else the first unlocked mission not won yet. */
 static int pick_mission(int won)
 {
     int cur = *(int *)(G->state + 4) + 1, side = campaign_side();
     if (g_choose_mission && g_choose_side == side && mission_open(side, g_choose_mission)) return g_choose_mission;
-    if (cur >= 1 && cur <= 16 && mission_open(side, cur)) return cur;
     if (won) return won;
+    if (cur >= 1 && cur <= 16 && mission_open(side, cur)) return cur;
     for (int n = 1; n <= 16; n++)
         if (mission_open(side, n) && !is_checked(mission_id(side, n))) return n;
     for (int n = 1; n <= 16; n++)
