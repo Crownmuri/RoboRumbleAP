@@ -238,37 +238,37 @@ static void log_mode(void)
 }
 
 /* ---------------------------------------------------------------- game speed */
-/* The frame function runs the game's step register_stress times per frame (an adjustable meant for stress tests)
-   and draws only the last one. ` (the key left of 1) cycles 1x, 1.5x (1 and 2 steps in turn) and 2x. */
+/* The simulation advances one turn per 32 ms of GetTickCount (lockstep turns, also in single player), so the game's
+   clock is what sets its speed. During missions the exe gets a clock that runs 1.5x or 2x as fast: production,
+   movement, shooting, timers, everything. ` (the key left of 1) cycles 1x, 1.5x and 2x. Outside missions the clock
+   runs normally, and switching never makes it jump. */
 static int g_speed;                 /* 0 = 1x, 1 = 1.5x, 2 = 2x */
-static int *g_stress;
-void *g_frame_resume;
+static int g_speed_on;
 static const char *const k_speed_text[3] = { "1x", "1.5x", "2x" };
+static const double k_speed_rate[3] = { 1.0, 1.5, 2.0 };
 const char *rr_speed_text(void) { return g_speed ? k_speed_text[g_speed] : NULL; }
 
-void __cdecl speed_frame(void)
-{
-    static int odd;
-    odd ^= 1;
-    *g_stress = g_speed == 2 ? 2 : g_speed == 1 ? 1 + odd : 1;
-}
+static DWORD (WINAPI *prev_GetTickCount)(void);
+static CRITICAL_SECTION g_clock_cs;
+static DWORD g_clock_real;
+static double g_clock_virtual;
 
-__asm__(
-    ".text\n"
-    ".globl _frame_stub\n"
-    "_frame_stub:\n"
-    "    pushal\n"
-    "    call _speed_frame\n"
-    "    popal\n"
-    "    pushl %ebx\n"
-    "    movl _g_stress, %eax\n"
-    "    movl (%eax), %eax\n"
-    "    jmp *_g_frame_resume\n");
-void frame_stub(void);
+static DWORD WINAPI in_GetTickCount(void)
+{
+    DWORD real = prev_GetTickCount();
+    EnterCriticalSection(&g_clock_cs);
+    if (!g_clock_real) { g_clock_real = real; g_clock_virtual = real; }
+    double rate = g_gui_mode == GUI_MODE_GAMEPLAY ? k_speed_rate[g_speed] : 1.0;
+    g_clock_virtual += (double)(DWORD)(real - g_clock_real) * rate;
+    g_clock_real = real;
+    DWORD v = (DWORD)(unsigned long long)g_clock_virtual;
+    LeaveCriticalSection(&g_clock_cs);
+    return v;
+}
 
 static void speed_key(void)
 {
-    if (!g_stress) return;
+    if (!g_speed_on) return;
     g_speed = (g_speed + 1) % 3;
     rr_log("input: game speed %s", k_speed_text[g_speed]);
     HWND h = rr_game_hwnd();
@@ -279,25 +279,12 @@ static void speed_key(void)
 
 static int install_speed(void)
 {
-    /* push ebx; mov eax,[stress]; dec eax; xor ebx,ebx; test eax,eax; mov al,1; mov [no_draw],al; jle */
-    BYTE *base = (BYTE *)GetModuleHandleA(NULL);
-    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
-    IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(nt);
-    for (int s = 0; s < nt->FileHeader.NumberOfSections; s++, sec++) {
-        if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
-        BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 24;
-        for (; p < end; p++)
-            if (p[0] == 0x53 && p[1] == 0xA1 && p[6] == 0x48 && p[7] == 0x33 && p[8] == 0xDB && p[9] == 0x85 &&
-                p[10] == 0xC0 && p[11] == 0xB0 && p[12] == 0x01 && p[13] == 0xA2 && p[18] == 0x7E && p[19] == 0x15) {
-                g_stress = *(int **)(p + 2);
-                g_frame_resume = p + 6;
-                if (!rr_write_jmp(p, (void *)frame_stub, 6)) return 0;
-                rr_log("input: ` changes the game speed (%p)", p);
-                return 1;
-            }
-    }
-    rr_log("input: frame code not found, no speed key");
-    return 0;
+    InitializeCriticalSection(&g_clock_cs);
+    prev_GetTickCount = rr_hook_iat(GetModuleHandleA(NULL), "KERNEL32.dll", "GetTickCount", (void *)in_GetTickCount);
+    if (!prev_GetTickCount) { rr_log("input: GetTickCount import not found, no speed key"); return 0; }
+    g_speed_on = 1;
+    rr_log("input: ` changes the game speed during missions");
+    return 1;
 }
 
 /* ---------------------------------------------------------------- 60 fps menus */
@@ -314,7 +301,7 @@ static void WINAPI in_Sleep(DWORD ms)
 static void filter(MSG *m)
 {
     log_mode();
-    if (m->message == WM_KEYDOWN && m->wParam == VK_OEM_3 && !(m->lParam & (1 << 30)) && g_stress) {
+    if (m->message == WM_KEYDOWN && m->wParam == VK_OEM_3 && !(m->lParam & (1 << 30)) && g_speed_on) {
         speed_key();
         m->message = WM_NULL;
         m->wParam = 0;

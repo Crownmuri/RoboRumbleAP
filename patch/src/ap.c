@@ -226,9 +226,15 @@ static int g_mission_running;     /* mission (1-16) being played, 0 = none */
 static int g_last_spy;
 
 static void (__cdecl *g_level_banner)(int level);   /* draws "LEVEL n" on the loading screen */
+static DWORD *g_in_mission;   /* the briefing shows the in-mission menu while this is set */
 static DWORD g_prev_mode;
 
-void ap_abandon_mission(void) { g_mission_running = 0; }   /* a mission picked from the in-mission menu */
+/* a mission left through the menu: no win, and the next briefing is a normal one */
+void ap_abandon_mission(void)
+{
+    g_mission_running = 0;
+    if (g_in_mission) *g_in_mission = 0;
+}
 int ap_mission_in_progress(void) { return g_mission_running != 0; }
 
 static int side_has_open_mission(int side)
@@ -577,6 +583,8 @@ void ap_install(void)
                     p[7] == 0x24 && p[8] == 0xE8 && p[13] == 0x83 && p[14] == 0xC4 && p[15] == 0x04 &&
                     p[16] == 0xB8 && p[17] == 0x08 && p[18] == 0 && p[19] == 0 && p[20] == 0 && p[21] == 0xC3) {
                     g_level_banner = (void *)(p + 13 + *(int *)(p + 9));
+                    /* the same load-game code first clears the in-mission flag: xor eax,eax; mov [flag],eax */
+                    if (p[-17] == 0x33 && p[-16] == 0xC0 && p[-15] == 0xA3) g_in_mission = *(DWORD **)(p - 14);
                     break;
                 }
         }

@@ -38,6 +38,17 @@ static const char *k_script =
     "IF AP_INGAME = 1 THEN do_menu_in_game\n"
     "GOTO do_menu\n"
     "\n"
+    ":ap_abandon\n"
+    "SWITCH\n"
+    "SETVARIABLE AP_PICK 999\n"
+    "GOTO ap_abandoned\n"
+    "\n"
+    ":ap_abandoned\n"
+    "TALKER\n"
+    "  >>do_menu\n"
+    "    Mission abandoned, master. B-b-b-back\n"
+    "    to the briefing.\n"
+    "\n"
     ":ap_missions\n"
     "SWITCH\n"
     "IF AP_ON = 1 THEN ap_missions_on\n"
@@ -154,7 +165,7 @@ void apdlg_generate(void)
     /* new first choices of the robot's menus: between briefings (do_menu) and during a mission (do_menu_in_game) */
     static const struct { const char *label, *choices; } k_menus[] = {
         { "do_menu", "  >>ap_missions\n    Choose a mission\n  >>save\n    Save the game\n" },
-        { "do_menu_in_game", "  >>ap_missions\n    Choose a mission\n" },
+        { "do_menu_in_game", "  >>ap_missions\n    Choose a mission\n  >>ap_abandon\n    Abandon mission\n" },
     };
     size_t cap = size + 16384, len = 0, clen;
     char *out = malloc(cap);
@@ -376,6 +387,10 @@ void apdlg_tick(void)
     if (pick) {
         set_var("AP_PICK", 0);
         int ps = pick > 100 ? 1 : 0, pn = pick % 100;
+        if (pick == 999) {   /* Abandon mission: the briefing of this mission again */
+            ps = side;
+            pn = *(int *)(rr_game()->state + 4) + 1;
+        }
         rr_log("ap: mission %d of side %d picked in the briefing", pn, ps);
         ap_choose_mission(ps, pn);
         if (mode == RR_MODE_BRIEFING) {
