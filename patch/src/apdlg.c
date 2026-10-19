@@ -20,14 +20,23 @@ int ap_side_mode(void);                    /* -1 = no slot, 0/1 = one side, 2 = 
 int ap_mission_open(int side, int n);
 void ap_choose_mission(int side, int n);
 int ap_campaign_side(void);
+int ap_mission_in_progress(void);
+void ap_abandon_mission(void);
 
 typedef struct { char name[40]; int value; } DlgVar;
 static DlgVar *g_vars;
 static int *g_nvars;
 #define MAX_VARS 100
+static int *g_choice_count, *g_choice_greyed, *g_redraw;
+static char *g_choice_labels;
 
 /* ---------------------------------------------------------------- the script */
 static const char *k_script =
+    "\n"
+    ":ap_back\n"
+    "SWITCH\n"
+    "IF AP_INGAME = 1 THEN do_menu_in_game\n"
+    "GOTO do_menu\n"
     "\n"
     ":ap_missions\n"
     "SWITCH\n"
@@ -36,7 +45,7 @@ static const char *k_script =
     "\n"
     ":ap_missions_off\n"
     "TALKER\n"
-    "  >>do_menu\n"
+    "  >>ap_back\n"
     "    Archipelago isn't c-c-c-connected,\n"
     "    master. Start the RoboRumble client\n"
     "    and load a campaign first.\n"
@@ -53,7 +62,7 @@ static const char *k_script =
     "    Red Star missions.\n"
     "  >>ap_side_b\n"
     "    Terraflux missions.\n"
-    "  >>do_menu\n"
+    "  >>ap_back\n"
     "    ...never mind.\n"
     "QUESTION Which campaign?\n"
     "\n"
@@ -67,13 +76,13 @@ static const char *k_script =
     "\n"
     ":ap_locked\n"
     "TALKER\n"
-    "  >>do_menu\n"
+    "  >>ap_back\n"
     "    That mission is still l-l-l-locked,\n"
     "    master.\n"
     "\n"
     ":ap_picked\n"
     "TALKER\n"
-    "  >>do_menu\n"
+    "  >>ap_back\n"
     "    Very well, master. The b-b-b-briefing\n"
     "    for that mission is on its way.\n";
 
@@ -102,7 +111,7 @@ static char *mission_lists(char *buf, size_t *len, size_t *cap)
                 snprintf(line, sizeof line, "  >>ap_pick_%c_%d\n    Mission %d%s\n", s, n, n, n == 16 ? " (final)" : "");
                 buf = append(buf, len, cap, line);
             }
-            snprintf(line, sizeof line, "  >>ap_%c%d\n    %s\n  >>do_menu\n    ...never mind.\n"
+            snprintf(line, sizeof line, "  >>ap_%c%d\n    %s\n  >>ap_back\n    ...never mind.\n"
                      "QUESTION Which %s mission?\n", s, 2 - page, page ? "Missions 1 to 8..." : "Missions 9 to 16...",
                      side ? "Terraflux" : "Red Star");
             buf = append(buf, len, cap, line);
@@ -142,25 +151,35 @@ void apdlg_generate(void)
     int crlf = strstr(src, "\r\n") != NULL;
     const char *nl = crlf ? "\r\n" : "\n";
 
-    /* "Choose a mission" as the first choice of do_menu */
-    char marker[32];
-    snprintf(marker, sizeof marker, ":do_menu%sYOU%s", nl, nl);
-    char *at = strstr(src, marker);
-    if (!at) { rr_log("ap: do_menu not found in common.dlg, no mission menu"); free(src); return; }
-    size_t head = (at - src) + strlen(marker);
-
-    size_t cap = size + 16384, len = 0;
+    /* new first choices of the robot's menus: between briefings (do_menu) and during a mission (do_menu_in_game) */
+    static const struct { const char *label, *choices; } k_menus[] = {
+        { "do_menu", "  >>ap_missions\n    Choose a mission\n  >>save\n    Save the game\n" },
+        { "do_menu_in_game", "  >>ap_missions\n    Choose a mission\n" },
+    };
+    size_t cap = size + 16384, len = 0, clen;
     char *out = malloc(cap);
     out[0] = 0;
-    memcpy(out, src, head);
-    out[head] = 0;
-    len = head;
-    char *choice = (char *)"  >>ap_missions\n    Choose a mission\n";
-    size_t clen;
-    char *c = with_line_ends(choice, crlf, &clen);
-    out = append(out, &len, &cap, c);
-    free(c);
-    out = append(out, &len, &cap, src + head);
+    const char *rest = src;
+    int added = 0;
+    for (int m = 0; m < 2; m++) {
+        char marker[48];
+        snprintf(marker, sizeof marker, ":%s%sYOU%s", k_menus[m].label, nl, nl);
+        const char *at = strstr(rest, marker);
+        if (!at) { rr_log("ap: %s not found in common.dlg", k_menus[m].label); continue; }
+        size_t head = (at - rest) + strlen(marker);
+        char *part = malloc(head + 1);
+        memcpy(part, rest, head);
+        part[head] = 0;
+        out = append(out, &len, &cap, part);
+        free(part);
+        char *c = with_line_ends(k_menus[m].choices, crlf, &clen);
+        out = append(out, &len, &cap, c);
+        free(c);
+        rest += head;
+        added++;
+    }
+    if (!added) { free(out); free(src); return; }
+    out = append(out, &len, &cap, rest);
 
     char *script = NULL;
     size_t slen = 0, scap = 0;
@@ -261,9 +280,65 @@ static int locate(void)
         g_reenter_exit = r + 30 + 0x11;
         rr_write_jmp(r, (void *)reenter_stub, 5);
     } else rr_log("ap: briefing loop end not found, a mission pick shows from the next briefing on");
-    rr_log("ap: dialog variables at %p (count %p), briefing restart %p", g_vars, g_nvars, r);
+
+    /* the choice list on screen, from the code that lists the engineer's boosters:
+       mov eax,[count]; mov edx,"buy_booster_%d"; ...; lea eax,[eax*8 + labels]; ...; mov [eax*4 + greyed],edx */
+    const char *bb = NULL;
+    sec = IMAGE_FIRST_SECTION(nt);
+    for (int i = 0; i < nt->FileHeader.NumberOfSections && !bb; i++, sec++) {
+        if (sec->Characteristics & IMAGE_SCN_MEM_EXECUTE) continue;
+        BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 16;
+        for (; p < end; p++) if (!memcmp(p, "buy_booster_%d", 15)) { bb = (const char *)p; break; }
+    }
+    sec = IMAGE_FIRST_SECTION(nt);
+    for (int i = 0; i < nt->FileHeader.NumberOfSections && bb && !g_choice_greyed; i++, sec++) {
+        if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 64;
+        for (; p < end; p++) {
+            /* a1 count / ba fmt / 89 54 24 04 / 89 5c 24 08 / 8d 04 80 / 8d 04 c5 labels */
+            if (p[0] != 0xA1 || p[5] != 0xBA || *(const char **)(p + 6) != bb || p[21] != 0x8D || p[22] != 0x04 ||
+                p[23] != 0xC5) continue;
+            for (BYTE *q = p + 28; q < p + 64; q++)
+                if (q[0] == 0x89 && q[1] == 0x14 && q[2] == 0x85) {
+                    g_choice_count = *(int **)(p + 1);
+                    g_choice_labels = *(char **)(p + 24);
+                    g_choice_greyed = *(int **)(q + 3);
+                    break;
+                }
+            if (g_choice_greyed) break;
+        }
+    }
+    /* briefing start: ...; mov [redraw counter],ecx (3: the background is drawn again on every buffer) */
+    sec = IMAGE_FIRST_SECTION(nt);
+    for (int i = 0; i < nt->FileHeader.NumberOfSections && !g_redraw; i++, sec++) {
+        if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 40;
+        for (; p < end; p++)
+            if (p[0] == 0x88 && p[1] == 0x15 && p[6] == 0x88 && p[7] == 0x15 && p[12] == 0x8B && p[13] == 0x15 &&
+                p[18] == 0x89 && p[19] == 0x0D && p[24] == 0x8B && p[25] == 0x0D && p[30] == 0xA3) {
+                g_redraw = *(int **)(p + 20);
+                break;
+            }
+    }
+    rr_log("ap: dialog variables at %p (count %p), briefing restart %p, choices %p/%p/%p, redraw %p",
+           g_vars, g_nvars, r, g_choice_count, g_choice_labels, g_choice_greyed, g_redraw);
     done = 1;
     return 1;
+}
+
+/* Locked missions in the mission lists are greyed out, like goods the engineer can't sell. */
+static void grey_locked(int side_mode)
+{
+    if (!g_choice_count || !g_choice_labels || !g_choice_greyed) return;
+    int n = *g_choice_count;
+    if (n < 0) n = -n;
+    if (n > 24) n = 24;
+    for (int i = 0; i < n; i++) {
+        const char *label = g_choice_labels + i * 0x28;
+        if (strncmp(label, "ap_pick_", 8) || (label[8] != 'a' && label[8] != 'b') || label[9] != '_') continue;
+        int s = label[8] == 'b', m = atoi(label + 10);
+        g_choice_greyed[i] = side_mode < 0 || !ap_mission_open(s, m);
+    }
 }
 
 /* game thread, every few frames */
@@ -274,6 +349,19 @@ void apdlg_tick(void)
     if (!locate()) return;
     int side_mode = ap_side_mode();
     set_var("AP_ON", side_mode >= 0);
+    int ingame = ap_mission_in_progress();
+    set_var("AP_INGAME", ingame);
+    grey_locked(side_mode);
+
+    /* money changed behind the game's back (Shop Money, dev window): the background with the old amount is still on
+       one of the buffers, so it is drawn again */
+    static int last_money = -1;
+    const RRGame *Gm = rr_game();
+    int money = *(int *)(Gm->state + 8);
+    if (money != last_money) {
+        if (last_money >= 0 && g_redraw && *g_redraw < 3) *g_redraw = 3;
+        last_money = money;
+    }
     if (side_mode < 0) return;
     int side = ap_campaign_side();
     set_var("AP_BOTH", side_mode == 2);
@@ -292,7 +380,14 @@ void apdlg_tick(void)
         ap_choose_mission(ps, pn);
         if (mode == RR_MODE_BRIEFING) {
             g_reenter_mode = RR_MODE_BRIEFING;
-            if (ps != side) {
+            if (ingame) {
+                /* from the menu during a mission: that mission is given up, the picked one loaded */
+                const RRGame *G = rr_game();
+                ap_abandon_mission();
+                *(int *)G->state = ps;
+                *(int *)(G->state + 4) = pn - 1;
+                g_reenter_mode = RR_MODE_LOADLEVEL;
+            } else if (ps != side) {
                 /* the other campaign: side and mission in the state block, then the level loading a loaded save
                    goes through (a save holds nothing more about its side) */
                 const RRGame *G = rr_game();

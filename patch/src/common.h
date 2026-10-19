@@ -82,4 +82,5 @@ const RRGame *rr_game(void);    /* NULL if the game data wasn't found */
 extern volatile DWORD g_gui_mode;
 int rr_watch_modes(void);       /* installs the mode hook once; 0 if not found */
 void rr_on_mode(void (*fn)(DWORD mode));   /* called on the game thread when the next screen is chosen */
+const char *rr_speed_text(void);   /* input.c: "1.5x"/"2x" or NULL at normal speed */
 void vfs_install(void);

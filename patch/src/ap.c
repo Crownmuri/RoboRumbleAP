@@ -225,40 +225,78 @@ void ap_choose_mission(int side, int n)
 static int g_mission_running;     /* mission (1-16) being played, 0 = none */
 static int g_last_spy;
 
+static void (__cdecl *g_level_banner)(int level);   /* draws "LEVEL n" on the loading screen */
+static DWORD g_prev_mode;
+
+void ap_abandon_mission(void) { g_mission_running = 0; }   /* a mission picked from the in-mission menu */
+int ap_mission_in_progress(void) { return g_mission_running != 0; }
+
+static int side_has_open_mission(int side)
+{
+    for (int n = 1; n <= 16; n++) if (mission_open(side, n)) return 1;
+    return 0;
+}
+
+/* The mission to play: the one picked in the menu, else the game's own next mission if it is unlocked (also a won
+   one: a replay), else the first unlocked mission not won yet. */
 static int pick_mission(void)
 {
     int cur = *(int *)(G->state + 4) + 1, side = campaign_side();
     if (g_choose_mission && g_choose_side == side && mission_open(side, g_choose_mission)) return g_choose_mission;
-    if (mission_open(side, cur) && !is_checked(mission_id(side, cur))) return cur;
+    if (cur >= 1 && cur <= 16 && mission_open(side, cur)) return cur;
     for (int n = 1; n <= 16; n++)
         if (mission_open(side, n) && !is_checked(mission_id(side, n))) return n;
-    return mission_open(side, cur) ? cur : 1;
+    for (int n = 1; n <= 16; n++)
+        if (mission_open(side, n)) return n;
+    return 1;
 }
 
 static void on_mode(DWORD mode)
 {
     if (!G || !g_have_slot) return;
     EnterCriticalSection(&g_cs);
-    if (g_mission_running && mode != RR_MODE_GAMEPLAY && mode != RR_MODE_SHOP) {
-        if (*G->winflag == 1) {
-            LeaveCriticalSection(&g_cs);
-            check(mission_id(campaign_side(), g_mission_running));
-            EnterCriticalSection(&g_cs);
-        }
+    DWORD prev = g_prev_mode;
+    g_prev_mode = mode;
+    int *level = (int *)(G->state + 4);
+    int won = 0;
+
+    /* A won mission: the end-of-mission screen moves the campaign on to the next level and loads it. A restart
+       keeps the level, and a mission picked in the menu clears g_mission_running first. */
+    if (g_mission_running && mode == RR_MODE_LOADLEVEL && prev != RR_MODE_BRIEFING &&
+        (*level == g_mission_running || *G->winflag == 1))
+        won = g_mission_running;
+    if (mode == RR_MODE_LOADLEVEL || mode == RR_MODE_MENU || mode == 11 /* RELOADLEVEL */ || mode == 13 /* LOADGAME */)
         g_mission_running = 0;
-    }
-    if (mode == RR_MODE_BRIEFING || mode == RR_MODE_LOADLEVEL) {
+
+    if (!g_mission_running && (mode == RR_MODE_BRIEFING || mode == RR_MODE_LOADLEVEL)) {
+        int side = campaign_side();
+        /* a campaign of a side this slot doesn't play, or one with nothing unlocked: the side that has */
+        if (!side_played(side) || !side_has_open_mission(side)) {
+            int to = side_played(g_start_side) && side_has_open_mission(g_start_side) ? g_start_side : 1 - side;
+            if (to != side && side_played(to)) {
+                rr_log("ap: campaign side %d isn't playable, switched to %d", side, to);
+                *(int *)G->state = to;
+            }
+        }
         int n = pick_mission();
-        int *level = (int *)(G->state + 4);
         if (*level != n - 1) {
             rr_log("ap: mission %d -> %d", *level + 1, n);
             *level = n - 1;
+            if (mode == RR_MODE_LOADLEVEL && g_level_banner) g_level_banner(*level);
         }
         if (mode == RR_MODE_LOADLEVEL) g_choose_mission = 0;
     }
-    if (mode == RR_MODE_GAMEPLAY && !g_mission_running) g_mission_running = *(int *)(G->state + 4) + 1;
+    if (mode == RR_MODE_GAMEPLAY && !g_mission_running) {
+        g_mission_running = *level + 1;
+        g_choose_mission = 0;   /* the pick is used up: after a win the game's own next mission stands */
+    }
+    int side_now = campaign_side();
     LeaveCriticalSection(&g_cs);
-    send_line("STATE %lu %d", mode, *(int *)(G->state + 4) + 1);
+    if (won) {
+        rr_log("ap: mission %d of side %d won", won, side_now);
+        check(mission_id(side_now, won));
+    }
+    send_line("STATE %lu %d", mode, *level + 1);
 }
 
 /* ---------------------------------------------------------------- robots */
@@ -525,6 +563,25 @@ void ap_install(void)
     BYTE *spy = rr_find_unique((const BYTE *)"\x2b\xc2\xba\xff\xff\xff\xff\x51\x89\x15", 10);
     if (spy && *(BYTE **)(spy + 15) == G->state + 8) g_spy_price = *(int **)(spy + 10);
     else rr_log("ap: spy code not found, no spy checks");
+
+    /* the load-game screen: mov eax,[level]; mov [esp],eax; call banner; add esp,4; mov eax,8; ret */
+    {
+        BYTE *base = (BYTE *)GetModuleHandleA(NULL);
+        IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+        IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(nt);
+        for (int i = 0; i < nt->FileHeader.NumberOfSections && !g_level_banner; i++, sec++) {
+            if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+            BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 24;
+            for (; p < end; p++)
+                if (p[0] == 0xA1 && *(BYTE **)(p + 1) == G->state + 4 && p[5] == 0x89 && p[6] == 0x04 &&
+                    p[7] == 0x24 && p[8] == 0xE8 && p[13] == 0x83 && p[14] == 0xC4 && p[15] == 0x04 &&
+                    p[16] == 0xB8 && p[17] == 0x08 && p[18] == 0 && p[19] == 0 && p[20] == 0 && p[21] == 0xC3) {
+                    g_level_banner = (void *)(p + 13 + *(int *)(p + 9));
+                    break;
+                }
+        }
+        if (!g_level_banner) rr_log("ap: level banner not found");
+    }
 
     HMODULE exe = GetModuleHandleA(NULL);
     prev_PeekMessageA = rr_hook_iat(exe, "USER32.dll", "PeekMessageA", (void *)ap_PeekMessageA);

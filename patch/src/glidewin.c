@@ -228,6 +228,28 @@ static LRESULT CALLBACK close_guard_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         ClipCursor(NULL);
         ExitProcess(0);
     }
+    /* The title bar and frame: while the game has focus nGlide reports the whole window as client area and keeps
+       the title-bar clicks to itself, so the window could only be moved after switching away. Handled here, in
+       front of nGlide, the way a normal window does it. */
+    if (msg == WM_NCHITTEST) {
+        LRESULT hit = DefWindowProcA(h, msg, wp, lp);
+        if (hit != HTCLIENT) return hit;
+    }
+    if (msg == WM_NCLBUTTONDOWN) {
+        if (wp == HTCLOSE) {
+            rr_log("window: close button, exiting");
+            ClipCursor(NULL);
+            ExitProcess(0);
+        }
+        if (wp == HTCAPTION || (wp >= HTLEFT && wp <= HTBOTTOMRIGHT) || wp == HTMINBUTTON || wp == HTMAXBUTTON ||
+            wp == HTSYSMENU) {
+            ClipCursor(NULL);
+            return DefWindowProcA(h, msg, wp, lp);
+        }
+    }
+    if (msg == WM_NCLBUTTONUP || msg == WM_NCLBUTTONDBLCLK || msg == WM_NCMOUSEMOVE ||
+        (msg == WM_SYSCOMMAND && ((wp & 0xFFF0) == SC_MOVE || (wp & 0xFFF0) == SC_SIZE || (wp & 0xFFF0) == SC_MINIMIZE)))
+        return DefWindowProcA(h, msg, wp, lp);
     return CallWindowProcA(g_ng_wndproc, h, msg, wp, lp);
 }
 
@@ -306,8 +328,10 @@ static void __stdcall fps_grBufferSwap(int interval)
     if (g_show_fps && tspan >= 0.5) {
         HWND h = rr_game_hwnd();
         char t[128];
-        snprintf(t, sizeof t, "RoboRumble - %.0f fps, slowest %.0f ms, swap wait %.1f ms",
-                 tframes / tspan, tworst, tswap / tframes);
+        const char *speed = rr_speed_text();
+        int n = snprintf(t, sizeof t, "RoboRumble - %.0f fps, slowest %.0f ms, swap wait %.1f ms",
+                         tframes / tspan, tworst, tswap / tframes);
+        if (speed && n > 0 && n < (int)sizeof t) snprintf(t + n, sizeof t - n, " - speed %s", speed);
         /* straight to DefWindowProc: the game's window procedure swallows WM_SETTEXT */
         if (h) DefWindowProcA(h, WM_SETTEXT, 0, (LPARAM)t);
         tstart = now; tframes = 0; tworst = 0; tswap = 0;

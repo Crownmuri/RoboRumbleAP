@@ -148,7 +148,7 @@ class RoboRumbleWorld(World):
                 pool.append(self.create_item(data.mission_access(side, 1)))
             for number in range(2, data.FINAL_MISSION):
                 item = self.create_item(data.mission_access(side, number))
-                if number <= open_missions:
+                if side == self.start_side and number <= open_missions:
                     self.multiworld.push_precollected(item)
                 else:
                     pool.append(item)
@@ -218,6 +218,10 @@ class RoboRumbleWorld(World):
     def can_play(self, state: CollectionState, side: int, mission: int) -> bool:
         return self.mission_open(state, side, mission) and self.has_parts(state, side, mission)
 
+    def side_reachable(self, state: CollectionState, side: int) -> bool:
+        """Some mission of that side can be played (builds happen in missions)."""
+        return any(self.mission_open(state, side, n) for n in range(1, data.FINAL_MISSION))
+
     def missions_open(self, state: CollectionState, count: int) -> bool:
         """At least `count` missions besides the first are unlocked, on any side."""
         found = sum(state.count_group(f"{data.SIDES[side]} Mission Access", self.player) for side in self.sides)
@@ -234,18 +238,21 @@ class RoboRumbleWorld(World):
                 lambda state, s=side: self.can_play(state, s, data.FINAL_MISSION)
                 and state.has(data.ARTIFACT, player, artifacts))
             if self.options.spy_checks:
-                for number in range(2, data.MISSIONS + 1):
+                for number in range(1, data.MISSIONS + 1):
                     self.get_location(data.spy_hint(side, number)).access_rule = (
                         lambda state, s=side, n=number: self.mission_open(state, s, n))
             for name in data.side_heads(side):
-                self.get_location(data.build_head(name)).access_rule = lambda state, n=name: state.has(n, player)
+                self.get_location(data.build_head(name)).access_rule = (
+                    lambda state, n=name, s=side: state.has(n, player) and self.side_reachable(state, s))
             for name in data.side_legs(side):
-                self.get_location(data.build_legs(name)).access_rule = lambda state, n=name: state.has(n, player)
+                self.get_location(data.build_legs(name)).access_rule = (
+                    lambda state, n=name, s=side: state.has(n, player) and self.side_reachable(state, s))
             if self.options.combo_builds:
                 for head in data.side_heads(side):
                     for legs in data.side_legs(side):
                         self.get_location(data.build_combo(head, legs)).access_rule = (
-                            lambda state, h=head, l=legs: state.has_all((h, l), player))
+                            lambda state, h=head, l=legs, s=side: state.has_all((h, l), player)
+                            and self.side_reachable(state, s))
         if self.options.booster_builds:
             for name in data.BOOSTERS:
                 self.get_location(data.build_booster(name)).access_rule = lambda state, n=name: state.has(n, player)

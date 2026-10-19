@@ -509,14 +509,27 @@ static void to_game(int cx, int cy, int *gx, int *gy)
     *gy = y < 0 ? 0 : y >= GAME_H ? GAME_H - 1 : y;
 }
 
+static int g_sizing;   /* the window is being moved or resized by the user */
+
+/* Edge scrolling needs the cursor kept in the game during missions. In menus and the briefing it stays free, so the
+   title bar can be reached to move the window ([window] clip_cursor=2 confines it everywhere, like before). */
+static int clip_wanted(void)
+{
+    return g_cfg.clip_cursor >= 2 || g_gui_mode == RR_MODE_GAMEPLAY;
+}
+
+/* Confines the cursor to the game while it is in front, but only once the cursor is over the game: dragging the
+   title bar or a frame edge must not pull it in. */
 static void update_clip(void)
 {
     if (!g_cfg.clip_cursor || !g_hwnd || g_translate_only) return;
-    if (g_active && GetForegroundWindow() == g_hwnd && !IsIconic(g_hwnd)) {
-        RECT r = g_dst;
-        MapWindowPoints(g_hwnd, NULL, (POINT *)&r, 2);
+    RECT r = g_dst;
+    MapWindowPoints(g_hwnd, NULL, (POINT *)&r, 2);
+    POINT cur;
+    if (!g_sizing && clip_wanted() && g_active && GetForegroundWindow() == g_hwnd && !IsIconic(g_hwnd) &&
+        GetCursorPos(&cur) && PtInRect(&r, cur))
         ClipCursor(&r);
-    } else ClipCursor(NULL);
+    else ClipCursor(NULL);
 }
 
 /* Mouse wheel zoom. The game zooms while Insert (in) or Page Up (out) is held, read from its
@@ -567,7 +580,29 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         }
         break;
-    case WM_MOUSEMOVE: case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK:
+    case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK: {
+        /* With the mouse captured (the game/wrapper does that while focused) a click on the title bar or frame
+           arrives as a client click outside the client area. It goes to Windows as the title-bar click it is. */
+        POINT sp = { (short)LOWORD(lp), (short)HIWORD(lp) };
+        RECT cr;
+        GetClientRect(hwnd, &cr);
+        if (!PtInRect(&cr, sp)) {
+            ClientToScreen(hwnd, &sp);
+            LRESULT hit = DefWindowProcA(hwnd, WM_NCHITTEST, 0, MAKELPARAM(sp.x, sp.y));
+            if (hit != HTCLIENT && hit != HTNOWHERE && hit != HTERROR) {
+                ReleaseCapture();
+                ClipCursor(NULL);
+                if (hit == HTCLOSE) { rr_log("window: close button, exiting"); ExitProcess(0); }
+                if (hit == HTCAPTION) return DefWindowProcA(hwnd, WM_SYSCOMMAND, SC_MOVE | HTCAPTION, MAKELPARAM(sp.x, sp.y));
+                if (hit >= HTLEFT && hit <= HTBOTTOMRIGHT)
+                    return DefWindowProcA(hwnd, WM_SYSCOMMAND, SC_SIZE | (hit - HTLEFT + WMSZ_LEFT), MAKELPARAM(sp.x, sp.y));
+                return DefWindowProcA(hwnd, msg == WM_LBUTTONDOWN ? WM_NCLBUTTONDOWN : WM_NCLBUTTONDBLCLK, hit,
+                                      MAKELPARAM(sp.x, sp.y));
+            }
+        }
+    }
+    /* fall through */
+    case WM_MOUSEMOVE: case WM_LBUTTONUP:
     case WM_RBUTTONDOWN: case WM_RBUTTONUP: case WM_RBUTTONDBLCLK:
     case WM_MBUTTONDOWN: case WM_MBUTTONUP: case WM_MBUTTONDBLCLK: {
         int gx, gy;
@@ -594,6 +629,13 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         update_dst();
         update_clip();
         InvalidateRect(hwnd, NULL, FALSE);
+        break;
+    case WM_ENTERSIZEMOVE:
+        g_sizing = 1;
+        ClipCursor(NULL);
+        break;
+    case WM_EXITSIZEMOVE:
+        g_sizing = 0;
         break;
     case WM_MOVE:
         update_clip();
@@ -648,6 +690,16 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             rr_log("window: close button, exiting");
             ClipCursor(NULL);
             ExitProcess(0);
+        }
+        /* Dragging the title bar or a frame edge: Windows would send itself SC_MOVE / SC_SIZE through the whole
+           window procedure chain, where a Glide wrapper's procedure can swallow it, so the loop starts here. */
+        if (msg == WM_NCLBUTTONDOWN && wp == HTCAPTION) {
+            ClipCursor(NULL);
+            return DefWindowProcA(hwnd, WM_SYSCOMMAND, SC_MOVE | HTCAPTION, lp);
+        }
+        if (msg == WM_NCLBUTTONDOWN && wp >= HTLEFT && wp <= HTBOTTOMRIGHT) {
+            ClipCursor(NULL);
+            return DefWindowProcA(hwnd, WM_SYSCOMMAND, SC_SIZE | (wp - HTLEFT + WMSZ_LEFT), lp);
         }
         return DefWindowProcA(hwnd, msg, wp, lp);
     case WM_CLOSE:
@@ -740,10 +792,11 @@ static BOOL WINAPI hook_GetCursorPos(LPPOINT pt)
         RECT want = g_dst, have;
         MapWindowPoints(g_hwnd, NULL, (POINT *)&want, 2);
         GetClipCursor(&have);
-        if (g_active && !IsIconic(g_hwnd)) {
+        if (g_active && !IsIconic(g_hwnd) && clip_wanted()) {
             /* only once the cursor is over the game: the title bar and its close button stay usable */
             POINT cur;
-            if (!EqualRect(&want, &have) && real_GetCursorPos(&cur) && PtInRect(&want, cur)) ClipCursor(&want);
+            if (!g_sizing && !EqualRect(&want, &have) && real_GetCursorPos(&cur) && PtInRect(&want, cur))
+                ClipCursor(&want);
         } else if (EqualRect(&want, &have)) {
             ClipCursor(NULL);
         }

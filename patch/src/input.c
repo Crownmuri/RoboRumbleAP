@@ -27,6 +27,7 @@
    log call, so WASD only changes meaning during missions. */
 #include "common.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #define GUI_MODE_GAMEPLAY 4
@@ -236,9 +237,89 @@ static void log_mode(void)
     }
 }
 
+/* ---------------------------------------------------------------- game speed */
+/* The frame function runs the game's step register_stress times per frame (an adjustable meant for stress tests)
+   and draws only the last one. ` (the key left of 1) cycles 1x, 1.5x (1 and 2 steps in turn) and 2x. */
+static int g_speed;                 /* 0 = 1x, 1 = 1.5x, 2 = 2x */
+static int *g_stress;
+void *g_frame_resume;
+static const char *const k_speed_text[3] = { "1x", "1.5x", "2x" };
+const char *rr_speed_text(void) { return g_speed ? k_speed_text[g_speed] : NULL; }
+
+void __cdecl speed_frame(void)
+{
+    static int odd;
+    odd ^= 1;
+    *g_stress = g_speed == 2 ? 2 : g_speed == 1 ? 1 + odd : 1;
+}
+
+__asm__(
+    ".text\n"
+    ".globl _frame_stub\n"
+    "_frame_stub:\n"
+    "    pushal\n"
+    "    call _speed_frame\n"
+    "    popal\n"
+    "    pushl %ebx\n"
+    "    movl _g_stress, %eax\n"
+    "    movl (%eax), %eax\n"
+    "    jmp *_g_frame_resume\n");
+void frame_stub(void);
+
+static void speed_key(void)
+{
+    if (!g_stress) return;
+    g_speed = (g_speed + 1) % 3;
+    rr_log("input: game speed %s", k_speed_text[g_speed]);
+    HWND h = rr_game_hwnd();
+    char t[64];
+    snprintf(t, sizeof t, "RoboRumble - speed %s", k_speed_text[g_speed]);
+    if (h) DefWindowProcA(h, WM_SETTEXT, 0, (LPARAM)t);
+}
+
+static int install_speed(void)
+{
+    /* push ebx; mov eax,[stress]; dec eax; xor ebx,ebx; test eax,eax; mov al,1; mov [no_draw],al; jle */
+    BYTE *base = (BYTE *)GetModuleHandleA(NULL);
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(nt);
+    for (int s = 0; s < nt->FileHeader.NumberOfSections; s++, sec++) {
+        if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 24;
+        for (; p < end; p++)
+            if (p[0] == 0x53 && p[1] == 0xA1 && p[6] == 0x48 && p[7] == 0x33 && p[8] == 0xDB && p[9] == 0x85 &&
+                p[10] == 0xC0 && p[11] == 0xB0 && p[12] == 0x01 && p[13] == 0xA2 && p[18] == 0x7E && p[19] == 0x15) {
+                g_stress = *(int **)(p + 2);
+                g_frame_resume = p + 6;
+                if (!rr_write_jmp(p, (void *)frame_stub, 6)) return 0;
+                rr_log("input: ` changes the game speed (%p)", p);
+                return 1;
+            }
+    }
+    rr_log("input: frame code not found, no speed key");
+    return 0;
+}
+
+/* ---------------------------------------------------------------- 60 fps menus */
+/* The briefing and menus wait 20 ms per frame (about 45 fps). Outside missions that wait is cut short; the display
+   (vsync, or the software renderer's limit) keeps them at 60. */
+static int g_menu_fps60;
+static void (WINAPI *prev_Sleep)(DWORD);
+static void WINAPI in_Sleep(DWORD ms)
+{
+    if (ms == 20 && g_menu_fps60 && g_gui_mode != GUI_MODE_GAMEPLAY) ms = 1;
+    prev_Sleep(ms);
+}
+
 static void filter(MSG *m)
 {
     log_mode();
+    if (m->message == WM_KEYDOWN && m->wParam == VK_OEM_3 && !(m->lParam & (1 << 30)) && g_stress) {
+        speed_key();
+        m->message = WM_NULL;
+        m->wParam = 0;
+        return;
+    }
     /* The game only quits from its own menu; Alt+F4 and the close button would leave it running windowless. */
     if ((m->message == WM_SYSKEYDOWN && m->wParam == VK_F4) ||
         (m->message == WM_NCLBUTTONUP && m->wParam == HTCLOSE) ||
@@ -401,9 +482,15 @@ void input_install(void)
     if (g_right_cmds && !install_clicks()) g_right_cmds = 0;
     if (!g_right_cmds) g_pan = 0;          /* panning lives on the right button's click */
     if (g_pan && !install_pan()) g_pan = 0;
+    if (GetPrivateProfileIntA("input", "speed_key", 1, g_ini_path)) install_speed();
 
     HMODULE exe = GetModuleHandleA(NULL);
     prev_PeekMessageA = rr_hook_iat(exe, "USER32.dll", "PeekMessageA", (void *)in_PeekMessageA);
     prev_GetMessageA = rr_hook_iat(exe, "USER32.dll", "GetMessageA", (void *)in_GetMessageA);
+    g_menu_fps60 = GetPrivateProfileIntA("window", "menu_fps60", 1, g_ini_path);
+    if (g_menu_fps60) {
+        prev_Sleep = rr_hook_iat(exe, "KERNEL32.dll", "Sleep", (void *)in_Sleep);
+        if (!prev_Sleep) { g_menu_fps60 = 0; rr_log("input: Sleep import not found, menus stay at 45 fps"); }
+    }
     if (g_wasd) rr_log("input: WASD scrolls the camera during missions");
 }

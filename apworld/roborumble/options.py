@@ -41,8 +41,8 @@ class StartingParts(Choice):
 
 class OpenMissions(Range):
     """
-    How many missions of each side are open from the start (mission 1 always is). Every other mission up to 15
-    needs its Mission Access item; unlocked missions can be played in any order.
+    How many missions of the starting side are open from the start (its mission 1 always is). Every other mission up
+    to 15 needs its Mission Access item; unlocked missions can be played in any order.
     """
     display_name = "Open Missions"
     range_start = 1

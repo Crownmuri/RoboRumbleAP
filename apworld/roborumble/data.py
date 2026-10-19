@@ -107,8 +107,12 @@ def mission_access(side: int, number: int) -> str:
     return f"{SIDES[side]} Mission {number} Access"
 
 
+def tag(side: int) -> str:
+    return f"[{SIDES[side]}]"
+
+
 def mission_complete(side: int, number: int) -> str:
-    return f"{SIDES[side]} Mission {number} Complete"
+    return f"{tag(side)} Mission {number} - Clear"
 
 
 def mission_id(side: int, number: int) -> int:
@@ -116,15 +120,15 @@ def mission_id(side: int, number: int) -> int:
 
 
 def final_goal(side: int) -> str:
-    return f"{SIDES[side]}: Defeat the Aliens"
+    return f"{tag(side)} Mission {FINAL_MISSION} - Defeat the Aliens"
 
 
 def build_head(name: str) -> str:
-    return f"Build {name}"
+    return f"{tag(HEADS.index(name) // 8)} Build {name}"
 
 
 def build_legs(name: str) -> str:
-    return f"Build {name}"
+    return f"{tag(LEGS.index(name) // 8)} Build {name}"
 
 
 def build_booster(name: str) -> str:
@@ -132,7 +136,7 @@ def build_booster(name: str) -> str:
 
 
 def build_combo(head: str, legs: str) -> str:
-    return f"Build {head} + {legs}"
+    return f"{tag(HEADS.index(head) // 8)} Build {head} + {legs}"
 
 
 def side_combos(side: int) -> List[str]:
@@ -152,7 +156,7 @@ def shop_invention(name: str) -> str:
 
 
 def spy_hint(side: int, number: int) -> str:
-    return f"{SIDES[side]} Spy Report Before Mission {number}"
+    return f"{tag(side)} Mission {number} - Spy Report"
 
 
 def starting_parts(side: int) -> Tuple[List[str], List[str]]:
