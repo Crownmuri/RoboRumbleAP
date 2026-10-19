@@ -9,7 +9,7 @@ from . import data
 from .options import RoboRumbleOptions
 
 SLOT_DATA_OPTIONS = (
-    "side", "starting_side", "starting_parts", "starting_weapons", "open_missions", "final_mission_wins", "logic_strictness", "booster_builds",
+    "side", "starting_side", "starting_parts", "starting_weapons", "random_starting_legs", "open_missions", "final_mission_wins", "logic_strictness", "booster_builds",
     "combo_builds", "shop_checks", "spy_checks", "alien_artifacts", "extra_artifacts", "death_link",
 )
 
@@ -115,12 +115,17 @@ class RoboRumbleWorld(World):
         self.start_heads, self.start_legs = [], []
         for side in self.sides:
             if self.options.starting_parts == "random_weapons":
-                self.start_heads += self.random.sample(data.side_attack_heads(side), self.options.starting_weapons.value)
-                self.start_legs.append(data.side_legs(side)[0])
+                # one weapon that does damage, the rest anything
+                first = self.random.choice(data.side_attack_heads(side))
+                rest = [h for h in data.side_heads(side) if h != first]
+                self.start_heads += [first] + self.random.sample(rest, self.options.starting_weapons.value - 1)
+                legs = [data.side_legs(side)[0]]
             else:
                 heads, legs = data.starting_parts(side)
                 self.start_heads += heads
-                self.start_legs += legs
+            if self.options.random_starting_legs:
+                legs = [self.random.choice(data.side_legs(side))]
+            self.start_legs += legs
 
     # ---------------------------------------------------------------- items
     def create_item(self, name: str) -> RoboRumbleItem:

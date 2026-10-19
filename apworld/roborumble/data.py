@@ -50,8 +50,8 @@ LEGS: Tuple[str, ...] = (
     "2-Legs A", "Heavy 4-Legs", "Kangaroo", "Caterpillar", "4-Tires", "Amphibian", "Propeller", "Snail",
     "2-Legs B", "Teleporter", "Jet-Pack", "Spider Legs", "Jet-Car", "Hovercraft", "Antigraviton", "Cube",
 )
-# Weapons that do no damage on their own: a robot army needs another weapon besides them
-SUPPORT_HEADS = ("Oiler", "Nitrogrenade")
+# Weapons that do no damage on their own (utility): a robot army needs another weapon besides them
+SUPPORT_HEADS = ("Oiler", "Nitrogrenade", "Disrupter")
 
 
 def side_attack_heads(side: int) -> List[str]:

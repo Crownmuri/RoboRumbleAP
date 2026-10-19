@@ -287,8 +287,12 @@ static void on_mode(DWORD mode)
 {
     /* Booting goes straight to a blank campaign (mode 9 without intro). For a fresh seed the game starts the way a
        new campaign does instead: the intro, then the first briefing of the slot's side. */
+    /* The game boots through its intro screen (mode 2), which skips the story when a side is remembered from the
+       last session and goes on to the boot campaign (mode 9). For a fresh seed the remembered side is cleared there,
+       so the story plays once and leads into a new campaign; booting without the intro screen gets it as a
+       replacement for mode 9. */
     static int booted;
-    if (mode == 9 && !booted) {
+    if ((mode == 2 || mode == 9) && !booted) {
         booted = 1;
         EnterCriticalSection(&g_cs);
         int fresh = fresh_seed();
@@ -299,7 +303,7 @@ static void on_mode(DWORD mode)
             rr_log("ap: fresh seed, the campaign starts with the intro");
             if (g_boot_flag) *g_boot_flag = 0;   /* a new campaign as from the menu, not the boot one */
             if (g_saved_side) *g_saved_side = 0; /* the intro only plays when no side is remembered */
-            rr_replace_mode(2);   /* INTRO, which goes on to the new campaign */
+            if (mode == 9) rr_replace_mode(2);
             return;
         }
     }

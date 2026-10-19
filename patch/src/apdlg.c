@@ -77,7 +77,7 @@ static const char *k_script =
     ":ap_abandon\n"
     "SWITCH\n"
     "SETVARIABLE AP_PICK 999\n"
-    "GOTO end\n"
+    "GOTO close_spy\n"   /* the game's own "close the dialog" action */
     "\n"
     ":ap_abandoned\n"
     "TALKER\n"
@@ -166,7 +166,7 @@ static char *mission_lists(char *buf, size_t *len, size_t *cap)
         for (int n = 1; n <= 16; n++) {
             snprintf(line, sizeof line,
                      "\n:ap_pick_%c_%d\nSWITCH\nIF AP_OPEN_%c_%d = 1 THEN ap_go_%c_%d\nGOTO ap_locked\n"
-                     "\n:ap_go_%c_%d\nSWITCH\nSETVARIABLE AP_PICK %d\nGOTO end\n",
+                     "\n:ap_go_%c_%d\nSWITCH\nSETVARIABLE AP_PICK %d\nGOTO close_spy\n",
                      s, n, s - 32, n, s, n, s, n, side * 100 + n);
             buf = append(buf, len, cap, line);
         }

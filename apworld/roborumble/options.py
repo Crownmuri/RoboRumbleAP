@@ -31,7 +31,8 @@ class StartingParts(Choice):
     """
     What you can build at the start.
     vanilla: the weapons and legs the first mission gives in the original game.
-    random_weapons: random weapons (as many as starting_weapons, never only Oiler or Nitrogrenade) and the side's basic legs.
+    random_weapons: random weapons, as many as starting_weapons; at least one of them does damage (not only Oiler,
+    Nitrogrenade or Disrupter).
     """
     display_name = "Starting Parts"
     option_vanilla = 0
@@ -41,7 +42,7 @@ class StartingParts(Choice):
 
 
 class StartingWeapons(Range):
-    """With starting_parts: random_weapons, how many weapons of each side you start with (all of them do damage)."""
+    """With starting_parts: random_weapons, how many weapons of each side you start with."""
     display_name = "Starting Weapons"
     range_start = 1
     range_end = 4
@@ -133,12 +134,18 @@ class ExtraArtifacts(Range):
     default = 2
 
 
+class RandomStartingLegs(DefaultOnToggle):
+    """Start with random legs of each side instead of its basic 2-Legs."""
+    display_name = "Random Starting Legs"
+
+
 @dataclass
 class RoboRumbleOptions(PerGameCommonOptions):
     side: Side
     starting_side: StartingSide
     starting_parts: StartingParts
     starting_weapons: StartingWeapons
+    random_starting_legs: RandomStartingLegs
     open_missions: OpenMissions
     final_mission_wins: FinalMissionWins
     logic_strictness: LogicStrictness
