@@ -30,23 +30,44 @@ class StartingSide(Choice):
 class StartingParts(Choice):
     """
     What you can build at the start.
-    vanilla: the weapons and legs the first mission gives in the original game.
-    random_weapons: random weapons, as many as starting_weapons; at least one of them does damage (not only Oiler,
-    Nitrogrenade or Disrupter).
+    normal: the weapons and legs the first mission gives in the original game.
+    random_weapons: random weapons (as many as starting_weapons, at least one of them doing damage) and the side's
+    basic legs.
+    random_legs: the original first weapons and random legs.
+    random_all: random weapons and random legs.
     """
     display_name = "Starting Parts"
-    option_vanilla = 0
+    option_normal = 0
     option_random_weapons = 1
+    option_random_legs = 2
+    option_random_all = 3
+    alias_vanilla = 0
     alias_minimal = 1
     default = 1
 
 
 class StartingWeapons(Range):
-    """With starting_parts: random_weapons, how many weapons of each side you start with."""
+    """With random starting weapons, how many weapons of each side you start with."""
     display_name = "Starting Weapons"
     range_start = 1
     range_end = 4
     default = 2
+
+
+class Goal(Choice):
+    """
+    final_mission_only: win the final mission (16). Its access item is shuffled into the pool like the others.
+    set_missions_and_final_mission: win the final mission; it opens after final_mission_wins other missions are won.
+    alien_artifacts_only: collect the Alien Artifacts (alien_artifacts); that alone is the goal.
+    alien_artifacts_and_final_mission: win the final mission; it opens once you have the Alien Artifacts.
+    With side: both, the final mission goals count for both campaigns.
+    """
+    display_name = "Goal"
+    option_final_mission_only = 0
+    option_set_missions_and_final_mission = 1
+    option_alien_artifacts_only = 2
+    option_alien_artifacts_and_final_mission = 3
+    default = 1
 
 
 class OpenMissions(Range):
@@ -61,10 +82,7 @@ class OpenMissions(Range):
 
 
 class FinalMissionWins(Range):
-    """
-    The final mission (16) has no access item: it opens once this many other missions of the same side are won,
-    so it can't be rushed.
-    """
+    """With goal: set_missions_and_final_mission, how many other missions of a side open its final mission."""
     display_name = "Wins Before the Final Mission"
     range_start = 0
     range_end = 15
@@ -119,24 +137,19 @@ class SpyChecks(Choice):
 
 
 class AlienArtifacts(Range):
-    """How many Alien Artifacts are needed before the final mission counts as the goal. 0 = none in the pool."""
+    """With the alien artifact goals, how many Alien Artifacts are needed."""
     display_name = "Alien Artifacts Required"
-    range_start = 0
-    range_end = 20
-    default = 0
+    range_start = 1
+    range_end = 30
+    default = 10
 
 
 class ExtraArtifacts(Range):
-    """How many Alien Artifacts are in the pool beyond the required ones."""
+    """With the alien artifact goals, how many Alien Artifacts are in the pool beyond the required ones."""
     display_name = "Extra Alien Artifacts"
     range_start = 0
     range_end = 10
     default = 2
-
-
-class RandomStartingLegs(DefaultOnToggle):
-    """Start with random legs of each side instead of its basic 2-Legs."""
-    display_name = "Random Starting Legs"
 
 
 @dataclass
@@ -145,7 +158,7 @@ class RoboRumbleOptions(PerGameCommonOptions):
     starting_side: StartingSide
     starting_parts: StartingParts
     starting_weapons: StartingWeapons
-    random_starting_legs: RandomStartingLegs
+    goal: Goal
     open_missions: OpenMissions
     final_mission_wins: FinalMissionWins
     logic_strictness: LogicStrictness

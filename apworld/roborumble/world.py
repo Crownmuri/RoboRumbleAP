@@ -9,7 +9,7 @@ from . import data
 from .options import RoboRumbleOptions
 
 SLOT_DATA_OPTIONS = (
-    "side", "starting_side", "starting_parts", "starting_weapons", "random_starting_legs", "open_missions", "final_mission_wins", "logic_strictness", "booster_builds",
+    "side", "starting_side", "starting_parts", "starting_weapons", "goal", "open_missions", "final_mission_wins", "logic_strictness", "booster_builds",
     "combo_builds", "shop_checks", "spy_checks", "alien_artifacts", "extra_artifacts", "death_link",
 )
 
@@ -79,8 +79,8 @@ class RoboRumbleWorld(World):
         "Boosters": set(data.BOOSTERS),
         "Base Upgrades": set(data.UPGRADES),
         "Inventions": set(data.INVENTIONS),
-        "Red Star Mission Access": {data.mission_access(0, n) for n in range(1, data.FINAL_MISSION)},
-        "Terraflux Mission Access": {data.mission_access(1, n) for n in range(1, data.FINAL_MISSION)},
+        "Red Star Mission Access": {data.mission_access(0, n) for n in range(1, data.FINAL_MISSION + 1)},
+        "Terraflux Mission Access": {data.mission_access(1, n) for n in range(1, data.FINAL_MISSION + 1)},
     }
     location_name_groups = {
         "Red Star Missions": set(_all_missions(0)),
@@ -114,17 +114,15 @@ class RoboRumbleWorld(World):
             return
         self.start_heads, self.start_legs = [], []
         for side in self.sides:
-            if self.options.starting_parts == "random_weapons":
+            heads, legs = data.starting_parts(side)
+            if self.options.starting_parts in ("random_weapons", "random_all"):
                 # one weapon that does damage, the rest anything
                 first = self.random.choice(data.side_attack_heads(side))
                 rest = [h for h in data.side_heads(side) if h != first]
-                self.start_heads += [first] + self.random.sample(rest, self.options.starting_weapons.value - 1)
-                legs = [data.side_legs(side)[0]]
-            else:
-                heads, legs = data.starting_parts(side)
-                self.start_heads += heads
-            if self.options.random_starting_legs:
+                heads = [first] + self.random.sample(rest, self.options.starting_weapons.value - 1)
+            if self.options.starting_parts in ("random_legs", "random_all"):
                 legs = [self.random.choice(data.side_legs(side))]
+            self.start_heads += heads
             self.start_legs += legs
 
     # ---------------------------------------------------------------- items
@@ -151,6 +149,8 @@ class RoboRumbleWorld(World):
         for side in self.sides:
             if side != self.start_side:
                 pool.append(self.create_item(data.mission_access(side, 1)))
+            if self.final_access_item():
+                pool.append(self.create_item(data.mission_access(side, data.FINAL_MISSION)))
             for number in range(2, data.FINAL_MISSION):
                 item = self.create_item(data.mission_access(side, number))
                 if side == self.start_side and number <= open_missions:
@@ -162,7 +162,7 @@ class RoboRumbleWorld(World):
                     pool.append(self.create_item(name))
         for name in data.BOOSTERS + data.UPGRADES + data.INVENTIONS:
             pool.append(self.create_item(name))
-        if self.options.alien_artifacts:
+        if self.artifact_goal():
             artifacts = self.options.alien_artifacts.value + self.options.extra_artifacts.value
             pool += [self.create_item(data.ARTIFACT) for _ in range(artifacts)]
 
@@ -194,12 +194,24 @@ class RoboRumbleWorld(World):
             names += [data.shop_invention(n) for n in data.INVENTIONS]
         campaign.add_locations({name: self.location_name_to_id[name] for name in names}, RoboRumbleLocation)
 
+        if self.options.goal == "alien_artifacts_only":
+            need = self.options.alien_artifacts.value
+            self.multiworld.completion_condition[self.player] = (
+                lambda state: state.has(data.ARTIFACT, self.player, need))
+            return
         for side in self.sides:
             goal = RoboRumbleLocation(self.player, data.final_goal(side), None, campaign)
             goal.place_locked_item(RoboRumbleItem(VICTORY, ItemClassification.progression, None, self.player))
             campaign.locations.append(goal)
         sides = len(self.sides)
         self.multiworld.completion_condition[self.player] = lambda state: state.has(VICTORY, self.player, sides)
+
+    def final_access_item(self) -> bool:
+        """The final mission opens with its own access item (otherwise wins or artifacts open it)."""
+        return self.options.goal in ("final_mission_only", "alien_artifacts_only")
+
+    def artifact_goal(self) -> bool:
+        return self.options.goal in ("alien_artifacts_only", "alien_artifacts_and_final_mission")
 
     # ---------------------------------------------------------------- logic
     def has_parts(self, state: CollectionState, side: int, mission: int) -> bool:
@@ -215,9 +227,11 @@ class RoboRumbleWorld(World):
                 and state.has_from_list(data.side_legs(side), self.player, legs))
 
     def mission_open(self, state: CollectionState, side: int, mission: int) -> bool:
-        if mission == data.FINAL_MISSION:
+        if mission == data.FINAL_MISSION and self.options.goal == "set_missions_and_final_mission":
             wins = sum(1 for n in range(1, data.FINAL_MISSION) if self.can_play(state, side, n))
             return wins >= self.options.final_mission_wins.value
+        if mission == data.FINAL_MISSION and self.options.goal == "alien_artifacts_and_final_mission":
+            return state.has(data.ARTIFACT, self.player, self.options.alien_artifacts.value)
         if mission == 1 and side == self.start_side:
             return True
         return state.has(data.mission_access(side, mission), self.player)
@@ -241,9 +255,9 @@ class RoboRumbleWorld(World):
             for number in range(1, data.MISSIONS + 1):
                 self.get_location(data.mission_complete(side, number)).access_rule = (
                     lambda state, s=side, n=number: self.can_play(state, s, n))
-            self.get_location(data.final_goal(side)).access_rule = (
-                lambda state, s=side: self.can_play(state, s, data.FINAL_MISSION)
-                and state.has(data.ARTIFACT, player, artifacts))
+            if self.options.goal != "alien_artifacts_only":
+                self.get_location(data.final_goal(side)).access_rule = (
+                    lambda state, s=side: self.can_play(state, s, data.FINAL_MISSION))
             if self.options.spy_checks:
                 for number in range(1, data.MISSIONS + 1):
                     self.get_location(data.spy_hint(side, number)).access_rule = (

@@ -214,26 +214,36 @@ class RoboRumbleContext(Context):
         side = int(self.slot_data.get("side", 0))
         return [0, 1] if side == 2 else [side]
 
+    def goal(self) -> int:
+        """0 final_mission_only, 1 set_missions_and_final_mission, 2 alien_artifacts_only, 3 alien artifacts + final"""
+        return int(self.slot_data.get("goal", 1))
+
+    def artifacts(self) -> int:
+        return sum(1 for item in self.items_received if item.item == data.ARTIFACT_ID)
+
     def unlocked_missions(self, side: int) -> List[int]:
         received = {item.item for item in self.items_received}
         wins = sum(1 for n in range(1, data.FINAL_MISSION) if data.mission_id(side, n) in self.checked_locations)
         start = int(self.slot_data.get("start_side", self.sides()[0]))
         unlocked = [n for n in range(1, data.FINAL_MISSION)
                     if (n == 1 and side == start) or data.mission_id(side, n) in received]
-        if wins >= int(self.slot_data.get("final_mission_wins", 10)):
+        goal = self.goal()
+        if (goal == 1 and wins >= int(self.slot_data.get("final_mission_wins", 10))) or                 (goal == 3 and self.artifacts() >= int(self.slot_data.get("alien_artifacts", 10))) or                 (goal in (0, 2) and data.mission_id(side, data.FINAL_MISSION) in received):
             unlocked.append(data.FINAL_MISSION)
         return unlocked
 
     async def check_goal(self) -> None:
         if self.finished_game or not self.slot:
             return
-        if any(data.mission_id(s, data.FINAL_MISSION) not in self.checked_locations for s in self.sides()):
+        if self.goal() == 2:
+            if self.artifacts() < int(self.slot_data.get("alien_artifacts", 10)):
+                return
+            await self.game_send("GOAL")   # the robot offers the epilogue
+        elif any(data.mission_id(s, data.FINAL_MISSION) not in self.checked_locations for s in self.sides()):
             return
-        artifacts = sum(1 for item in self.items_received if item.item == data.ARTIFACT_ID)
-        if artifacts >= int(self.slot_data.get("alien_artifacts", 0)):
-            self.finished_game = True
-            await self.send_msgs([{"cmd": "StatusUpdate", "status": CommonClient.ClientStatus.CLIENT_GOAL}])
-            CommonClient.logger.info("Goal reached: the Aliens are defeated!")
+        self.finished_game = True
+        await self.send_msgs([{"cmd": "StatusUpdate", "status": CommonClient.ClientStatus.CLIENT_GOAL}])
+        CommonClient.logger.info("Goal reached!")
 
     # ------------------------------------------------------------ game side
     async def game_send(self, line: str) -> None:
@@ -253,7 +263,11 @@ class RoboRumbleContext(Context):
         start_side = int(self.slot_data.get("start_side", 0 if side == 2 else side))
         seed_name = getattr(self, "server_seed_name", None) or self.seed_name or "seed"
         seed = "".join(c for c in seed_name if c.isalnum())[:40] + f"_{self.slot}"
-        await self.game_send(f"SLOT {side} {final_wins} {start_side} {seed}")
+        goal = self.goal()
+        artifacts = int(self.slot_data.get("alien_artifacts", 10))
+        await self.game_send(f"SLOT {side} {final_wins} {start_side} {seed} {goal} {artifacts}")
+        if goal == 2 and self.artifacts() >= artifacts:
+            await self.game_send("GOAL")
         await self.send_checked()
         await self.send_items()
 

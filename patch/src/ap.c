@@ -43,7 +43,10 @@ static CRITICAL_SECTION g_cs;
 static int g_enabled, g_port;
 
 /* received from the client (under g_cs) */
-static int g_have_slot, g_side_mode, g_final_wins, g_start_side;   /* side mode 0 Red Star, 1 Terraflux, 2 both */
+static int g_have_slot, g_side_mode, g_final_wins, g_start_side;
+static int g_goal = 1, g_artifacts_needed = 10;   /* goal option (0-3) and the artifacts it needs */
+static volatile LONG g_goal_done;                 /* alien_artifacts_only: reached, the epilogue is offered */
+#define ARTIFACT_ID 5100   /* side mode 0 Red Star, 1 Terraflux, 2 both */
 static char g_seed[64];
 static int *g_items, g_nitems;
 static int *g_checked, g_nchecked;
@@ -129,6 +132,10 @@ static int mission_open(int side, int n)
 {
     if (n == 1 && side == g_start_side) return 1;
     if (n < 16) return count_item(mission_id(side, n)) > 0;
+    /* the final mission: its access item (final_mission_only, alien_artifacts_only), the artifacts
+       (alien_artifacts_and_final_mission) or a number of wins (set_missions_and_final_mission) */
+    if (g_goal == 0 || g_goal == 2) return count_item(mission_id(side, 16)) > 0;
+    if (g_goal == 3) return count_item(ARTIFACT_ID) >= g_artifacts_needed;
     int wins = 0;
     for (int m = 1; m < 16; m++) wins += is_checked(mission_id(side, m));
     return wins >= g_final_wins;
@@ -240,6 +247,16 @@ void ap_abandon_mission(void)
     if (g_in_mission) *g_in_mission = 0;
 }
 int ap_mission_in_progress(void) { return g_mission_running != 0; }
+int ap_goal_done(void) { return g_goal_done != 0; }
+/* alien_artifacts_only: how many artifacts are still missing (-1 with another goal) */
+int ap_artifacts_missing(void)
+{
+    if (!g_have_slot || g_goal != 2) return -1;
+    EnterCriticalSection(&g_cs);
+    int n = g_artifacts_needed - count_item(ARTIFACT_ID);
+    LeaveCriticalSection(&g_cs);
+    return n < 0 ? 0 : n;
+}
 
 /* the campaign goes to this mission at the next level load; the loading screen's door shows its number */
 void ap_set_mission(int side, int n)
@@ -315,6 +332,9 @@ static void on_mode(DWORD mode)
         if (g_have_slot) rr_log("ap: new campaign on side %d, faction screen skipped", side);
     }
     if (!G || !g_have_slot) return;
+    /* the remembered side was cleared for the fresh seed's intro; once in the campaign it is that of the campaign
+       again, so the next boot doesn't play the intro a second time */
+    if (mode == RR_MODE_BRIEFING && g_saved_side && *g_saved_side == 0) *g_saved_side = campaign_side() + 1;
     EnterCriticalSection(&g_cs);
     DWORD prev = g_prev_mode;
     g_prev_mode = mode;
@@ -597,12 +617,13 @@ static int *parse_ids(const char *s, int *n)
 static void handle(char *line)
 {
     if (!strncmp(line, "SLOT ", 5)) {
-        int side = 0, final_wins = 10, start = 0;
+        int side = 0, final_wins = 10, start = 0, goal = 1, artifacts = 10;
         char seed[64] = "";
-        sscanf(line + 5, "%d %d %d %63s", &side, &final_wins, &start, seed);
+        sscanf(line + 5, "%d %d %d %63s %d %d", &side, &final_wins, &start, seed, &goal, &artifacts);
         EnterCriticalSection(&g_cs);
         if (strcmp(seed, g_seed)) g_money_applied = -1;
         g_side_mode = side; g_final_wins = final_wins; g_start_side = start;
+        g_goal = goal; g_artifacts_needed = artifacts;
         lstrcpynA(g_seed, seed, sizeof g_seed);
         g_have_slot = 1;
         LeaveCriticalSection(&g_cs);
@@ -627,6 +648,11 @@ static void handle(char *line)
         g_choose_mission = n >= 1 && n <= 16 ? n : 0;
         LeaveCriticalSection(&g_cs);
         rr_log("ap: next mission %d of side %d", n, side);
+    } else if (!strcmp(line, "GOAL")) {
+        if (!InterlockedExchange(&g_goal_done, 1)) {
+            rr_log("ap: goal reached");
+            queue_message("Archipelago goal reached! The robot has the epilogue for you.");
+        }
     } else if (!strncmp(line, "MSG ", 4)) {
         rr_log("ap: %s", line + 4);
         queue_message(line + 4);

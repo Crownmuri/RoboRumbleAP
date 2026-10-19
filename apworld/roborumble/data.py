@@ -7,7 +7,7 @@ table:
     legs             LEGS_OFFSET + legs index 0-15
     boosters         BOOSTER_OFFSET + booster index 0-8 (order of the Boosters mask = the robot builder's order)
     mission access   MISSION_OFFSET + 100 * side + mission number 1-15 (item; mission 1 only for the second side
-                     with side: both; the final mission 16 has none,
+                     with side: both; mission 16 only with the goals final_mission_only and alien_artifacts_only,
                      it opens after a number of wins, option final_mission_wins)
     mission complete MISSION_OFFSET + 100 * side + mission number 1-16 (location)
     combo build      COMBO_OFFSET + head index * 16 + legs index (location, option combo_builds)
@@ -188,7 +188,7 @@ def item_table() -> Dict[str, int]:
     for i, name in enumerate(BOOSTERS):
         table[name] = BOOSTER_OFFSET + i
     for side in (0, 1):
-        for number in range(1, FINAL_MISSION):
+        for number in range(1, FINAL_MISSION + 1):
             table[mission_access(side, number)] = mission_id(side, number)
     for i, name in enumerate(UPGRADES):
         table[name] = UPGRADE_OFFSET + i

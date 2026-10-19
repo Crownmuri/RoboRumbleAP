@@ -23,6 +23,18 @@ int ap_campaign_side(void);
 int ap_mission_in_progress(void);
 void ap_abandon_mission(void);
 void ap_set_mission(int side, int n);
+int ap_goal_done(void);
+int ap_artifacts_missing(void);
+static char *g_choice_text;   /* the choices' texts, 0x8c each */
+static void (__cdecl *g_outro)(void);   /* the game's ending: fade out, outro2.avi */
+static int g_epilogue;
+static void epilogue_mode(DWORD mode)
+{
+    if (mode == 15 && g_epilogue) {
+        g_epilogue = 0;
+        if (g_outro) g_outro();
+    }
+}
 static void (__cdecl *g_door_close)(void);   /* the briefing's doors close (with their sound) */
 static DWORD *g_next_mode;                   /* the briefing leaves for this mode once the doors are shut */
 static BYTE *g_door_flag;
@@ -38,6 +50,41 @@ static char *g_choice_labels;
 static const char *k_script =
     "\n"
     ":ap_do_menu\n"
+    "SWITCH\n"
+    "IF AP_GOAL = 1 THEN ap_do_menu_goal\n"
+    "IF AP_ARTGOAL = 1 THEN ap_do_menu_goal\n"
+    "GOTO ap_do_menu_plain\n"
+    "\n"
+    ":ap_do_menu_goal\n"
+    "YOU\n"
+    "  >>ap_epilogue\n"
+    "    Watch the epilogue\n"
+    "  >>ap_missions\n"
+    "    Choose a mission\n"
+    "  >>save\n"
+    "    Save the game\n"
+    "  >>load\n"
+    "    Load a game\n"
+    "  >>options\n"
+    "    Set some options\n"
+    "  >>areyousure_quit\n"
+    "    Quit the game\n"
+    "SETVARIABLE ROBOT_WELCOME 1\n"
+    "\n"
+    ":ap_epilogue\n"
+    "TALKER\n"
+    "  >>ap_epilogue_go\n"
+    "    Master, the Alien Artifacts are all\n"
+    "    ours. Whatever the Aliens planned\n"
+    "    with them, it is over now. The war\n"
+    "    is w-w-w-w-won, master.\n"
+    "\n"
+    ":ap_epilogue_go\n"
+    "SWITCH\n"
+    "SETVARIABLE AP_PICK 997\n"
+    "GOTO close_spy\n"
+    "\n"
+    ":ap_do_menu_plain\n"
     "YOU\n"
     "  >>ap_missions\n"
     "    Choose a mission\n"
@@ -371,6 +418,8 @@ static int locate(void)
                 if (q[0] == 0x89 && q[1] == 0x14 && q[2] == 0x85) {
                     g_choice_count = *(int **)(p + 1);
                     g_choice_labels = *(char **)(p + 24);
+                    /* before it, the text copy: lea esi,[eax*4 + texts]; mov dl,[edi]; ... jne */
+                    if (p[-17] == 0x8D && p[-16] == 0x34 && p[-15] == 0x85) g_choice_text = *(char **)(p - 14);
                     g_choice_greyed = *(int **)(q + 3);
                     break;
                 }
@@ -389,6 +438,34 @@ static int locate(void)
                 break;
             }
     }
+    /* the ending: the function that uses "pak2\outro2.avi", found back from that reference to its prologue
+       (push edi; push esi; push ebp; push ebx; sub esp,..) */
+    {
+        const char *outro = NULL;
+        sec = IMAGE_FIRST_SECTION(nt);
+        for (int i = 0; i < nt->FileHeader.NumberOfSections && !outro; i++, sec++) {
+            if (sec->Characteristics & IMAGE_SCN_MEM_EXECUTE) continue;
+            BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 16;
+            for (; p < end; p++) if (!memcmp(p, "outro2.avi", 10) && p[-1] == '\\') { outro = (const char *)p - 5; break; }
+        }
+        sec = IMAGE_FIRST_SECTION(nt);
+        for (int i = 0; i < nt->FileHeader.NumberOfSections && outro && !g_outro; i++, sec++) {
+            if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+            BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 4;
+            for (; p < end; p++) {
+                if (*(const char **)p != outro) continue;
+                for (BYTE *q = p; q > p - 0x400; q--)
+                    if (q[0] == 0x57 && q[1] == 0x56 && q[2] == 0x55 && q[3] == 0x53 && q[4] == 0x83 && q[5] == 0xEC &&
+                        (q[-1] == 0x00 || q[-1] == 0xC3 || q[-1] == 0x90 || q[-1] == 0xCC)) {
+                        g_outro = (void *)q;
+                        break;
+                    }
+                break;
+            }
+        }
+        if (!g_outro) rr_log("ap: ending not found, the epilogue shows only the credits");
+    }
+    rr_on_mode(epilogue_mode);
     rr_log("ap: dialog variables at %p (count %p), doors %p, choices %p/%p/%p, redraw %p",
            g_vars, g_nvars, (void *)g_door_close, g_choice_count, g_choice_labels, g_choice_greyed, g_redraw);
     done = 1;
@@ -404,6 +481,18 @@ static void grey_locked(int side_mode)
     if (n > 24) n = 24;
     for (int i = 0; i < n; i++) {
         const char *label = g_choice_labels + i * 0x28;
+        if (!strcmp(label, "ap_epilogue")) {
+            /* the artifact goal: greyed with the count until it is reached */
+            int missing = ap_artifacts_missing();
+            int done = ap_goal_done() || missing == 0;
+            g_choice_greyed[i] = !done;
+            if (g_choice_text) {
+                char *t = g_choice_text + i * 0x8c;
+                if (done) lstrcpynA(t, "Watch the epilogue", 0x8c);
+                else snprintf(t, 0x8c, "Epilogue (%d more Alien Artifact%s)", missing, missing == 1 ? "" : "s");
+            }
+            continue;
+        }
         if (strncmp(label, "ap_pick_", 8) || (label[8] != 'a' && label[8] != 'b') || label[9] != '_') continue;
         int s = label[8] == 'b', m = atoi(label + 10);
         g_choice_greyed[i] = side_mode < 0 || !ap_mission_open(s, m);
@@ -420,6 +509,8 @@ void apdlg_tick(void)
     set_var("AP_ON", side_mode >= 0);
     int ingame = ap_mission_in_progress();
     set_var("AP_INGAME", ingame);
+    set_var("AP_GOAL", ap_goal_done());
+    set_var("AP_ARTGOAL", ap_artifacts_missing() >= 0);
     grey_locked(side_mode);
 
     /* money changed behind the game's back (Shop Money, dev window): the background with the old amount is still on
@@ -444,6 +535,15 @@ void apdlg_tick(void)
     int pick = get_var("AP_PICK", 0);
     if (pick) {
         set_var("AP_PICK", 0);
+        if (pick == 997) {   /* the epilogue: the game's ending (outro2), then the credits */
+            rr_log("ap: epilogue");
+            g_epilogue = 1;   /* the outro plays when the credits screen starts */
+            if (g_door_close && g_next_mode && g_door_flag) {
+                if (!*g_door_flag) g_door_close();
+                *g_next_mode = 15;   /* CREDITS */
+            }
+            return;
+        }
         int ps = pick > 100 ? 1 : 0, pn = pick % 100;
         if (pick == 999) {   /* Abandon mission: the briefing of this mission again */
             ps = side;
