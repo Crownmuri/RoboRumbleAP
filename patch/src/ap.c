@@ -201,6 +201,26 @@ static void apply(void)
     }
 }
 
+/* ---------------------------------------------------------------- for the dialogs (apdlg.c) */
+int ap_side_mode(void) { return g_have_slot ? g_side_mode : -1; }
+int ap_campaign_side(void) { return campaign_side(); }
+
+int ap_mission_open(int side, int n)
+{
+    EnterCriticalSection(&g_cs);
+    int open = g_have_slot && side_played(side) && mission_open(side, n);
+    LeaveCriticalSection(&g_cs);
+    return open;
+}
+
+void ap_choose_mission(int side, int n)
+{
+    EnterCriticalSection(&g_cs);
+    g_choose_side = side;
+    g_choose_mission = n;
+    LeaveCriticalSection(&g_cs);
+}
+
 /* ---------------------------------------------------------------- missions */
 static int g_mission_running;     /* mission (1-16) being played, 0 = none */
 static int g_last_spy;
@@ -338,6 +358,7 @@ static void tick(void)
         }
     }
     LeaveCriticalSection(&g_cs);
+    apdlg_tick();
 }
 
 static BOOL (WINAPI *prev_PeekMessageA)(LPMSG, HWND, UINT, UINT, UINT);

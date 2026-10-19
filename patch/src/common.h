@@ -54,6 +54,12 @@ void soundlog_install(void);
 void glidetrace_install(void);
 void input_install(void);
 void ap_install(void);
+void apdlg_generate(void);      /* apdlg.c: the Archipelago menus in the briefing dialogs (needs vfs.c) */
+void apdlg_tick(void);          /* apdlg.c: dialog variables, on the game thread */
+
+/* ---- vfs.c ---- */
+char *rr_pak_read(const char *pak, const char *entry, DWORD *size);   /* pak relative to the game dir */
+int rr_vfs_generate(const char *name, const void *data, DWORD size);   /* the game gets this file instead */
 
 /* ---- shared game locations (devui.c finds them by pattern, the first call does the work) ---- */
 typedef struct {

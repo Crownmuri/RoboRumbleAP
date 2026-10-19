@@ -385,11 +385,37 @@ static void build_sfx(void)
     free(pak);
 }
 
+/* ---- for other parts of the patch ---- */
+char *rr_pak_read(const char *pak, const char *entry, DWORD *size)
+{
+    return pak_read(pak, entry, size);
+}
+
+/* Writes rrpatch_gen\<name> and hands it to the game whenever it opens <name>. */
+int rr_vfs_generate(const char *name, const void *data, DWORD size)
+{
+    if (g_generated_count >= MAX_GENERATED) return 0;
+    char rel[VFS_NAME_MAX + 1], full[MAX_PATH];
+    if (snprintf(rel, sizeof rel, "rrpatch_gen\\%s", name) > VFS_NAME_MAX) return 0;
+    snprintf(full, sizeof full, "%srrpatch_gen", g_game_dir);
+    CreateDirectoryA(full, NULL);
+    snprintf(full, sizeof full, "%s%s", g_game_dir, rel);
+    FILE *f = fopen(full, "wb");
+    if (!f) return 0;
+    fwrite(data, 1, size, f);
+    fclose(f);
+    lstrcpynA(g_generated[g_generated_count].name, name, sizeof g_generated[0].name);
+    lstrcpyA(g_generated[g_generated_count].path, rel);
+    g_generated_count++;
+    return 1;
+}
+
 void vfs_install(void)
 {
     g_log_files = GetPrivateProfileIntA("general", "log_files", 0, g_ini_path);
     build_merged_adjust();
     build_sfx();
+    apdlg_generate();
     if (!g_merged_adjust[0] && !g_generated_count && !g_cfg.override_enabled && !g_log_files) return;
     BYTE *fn = rr_find_unique(k_vfs_open_sig, sizeof k_vfs_open_sig);
     if (!fn) { rr_log("vfs: open function not found, overrides off"); g_merged_adjust[0] = 0; return; }
