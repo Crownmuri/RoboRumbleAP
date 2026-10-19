@@ -143,5 +143,6 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
     soundlog_install();
     glidetrace_install();
     input_install();
+    ap_install();
     return TRUE;
 }

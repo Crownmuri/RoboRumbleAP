@@ -113,6 +113,19 @@ static int locate(void)
     return g_cmds && g_state && g_heads && g_legs;
 }
 
+const RRGame *rr_game(void)
+{
+    static int tried, ok;
+    static RRGame g;
+    if (!tried) {
+        tried = 1;
+        ok = locate();
+        g.state = g_state; g.heads = g_heads; g.legs = g_legs; g.boosters = g_boosters;
+        g.winflag = g_winflag; g.restart = g_restart;
+    }
+    return ok ? &g : NULL;
+}
+
 /* ---- adjustables ---- */
 typedef void (__thiscall *adj_format_t)(void *self, char *out);
 
@@ -442,7 +455,7 @@ static DWORD WINAPI dev_thread(LPVOID arg)
 void devui_install(void)
 {
     if (!GetPrivateProfileIntA("dev", "enabled", 0, g_ini_path)) return;
-    if (!locate()) { rr_log("dev: game data not found, dev window off"); return; }
+    if (!rr_game()) { rr_log("dev: game data not found, dev window off"); return; }
     InitializeCriticalSection(&g_qcs);
     HMODULE exe = GetModuleHandleA(NULL);
     real_PeekMessageA = rr_hook_iat(exe, "USER32.dll", "PeekMessageA", (void *)hook_PeekMessageA);

@@ -58,6 +58,11 @@ __asm__(
     ".globl _mode_stub\n"
     "_mode_stub:\n"
     "    movl %ebx, _g_gui_mode\n"
+    "    pushal\n"
+    "    pushl %ebx\n"
+    "    call _rr_mode_changed\n"
+    "    addl $4, %esp\n"
+    "    popal\n"
     "    movl _g_mode_fmt, %eax\n"
     "    jmp *_g_mode_resume\n"
 
@@ -108,6 +113,18 @@ __asm__(
     "    flds (%eax)\n"
     "    jmp *_g_arrows_resume\n");
 void mode_stub(void);
+
+/* Runs on the game thread right after the main loop picked its next screen, before that screen starts. */
+static void (*g_mode_listeners[4])(DWORD mode);
+void rr_on_mode(void (*fn)(DWORD mode))
+{
+    for (int i = 0; i < 4; i++) if (!g_mode_listeners[i]) { g_mode_listeners[i] = fn; return; }
+}
+
+void __cdecl rr_mode_changed(DWORD mode)
+{
+    for (int i = 0; i < 4; i++) if (g_mode_listeners[i]) g_mode_listeners[i](mode);
+}
 void down_stub(void);
 void enemy_stub(void);
 void ground_stub(void);
@@ -271,7 +288,15 @@ static BYTE *find_masked(const char *pat, const char *mask)
     return found;
 }
 
+static int hook_mode_switch(void);
 static BYTE *rel32(BYTE *at) { return at + 4 + *(int *)at; }   /* target of a rel32 operand */
+
+int rr_watch_modes(void)
+{
+    static int done = -1;
+    if (done < 0) done = hook_mode_switch();
+    return done;
+}
 
 static int hook_mode_switch(void)
 {
@@ -365,7 +390,7 @@ void input_install(void)
     g_pan_speed = (float)atof(buf);
     if (!g_right_cmds && !g_wasd) return;
 
-    if (!hook_mode_switch()) rr_log("input: mode switch not found");
+    if (!rr_watch_modes()) rr_log("input: mode switch not found");
     if (g_right_cmds && !install_clicks()) g_right_cmds = 0;
     if (!g_right_cmds) g_pan = 0;          /* panning lives on the right button's click */
     if (g_pan && !install_pan()) g_pan = 0;

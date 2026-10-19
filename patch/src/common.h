@@ -53,4 +53,27 @@ void devui_install(void);
 void soundlog_install(void);
 void glidetrace_install(void);
 void input_install(void);
+void ap_install(void);
+
+/* ---- shared game locations (devui.c finds them by pattern, the first call does the work) ---- */
+typedef struct {
+    BYTE *state;        /* +0 side (0 A, 1 B), +4 mission index 0-15, +8 shop money,
+                           +0x0C available[22], +0x22 owned[22]: 9 boosters, 10 base upgrades, 3 inventions */
+    char *heads, *legs, *boosters;   /* '+'/'-' masks the robot builder reads */
+    DWORD *winflag;     /* 1 = mission won, 2 = lost */
+    BYTE *restart;
+} RRGame;
+const RRGame *rr_game(void);    /* NULL if the game data wasn't found */
+
+/* ---- game mode (input.c): GUI_MODE_* of the main loop ---- */
+#define RR_MODE_LOADING 1
+#define RR_MODE_MENU 3
+#define RR_MODE_GAMEPLAY 4
+#define RR_MODE_SHOP 5
+#define RR_MODE_BRIEFING 7
+#define RR_MODE_LOADLEVEL 8
+#define RR_MODE_END_OF_LEVEL 10
+extern volatile DWORD g_gui_mode;
+int rr_watch_modes(void);       /* installs the mode hook once; 0 if not found */
+void rr_on_mode(void (*fn)(DWORD mode));   /* called on the game thread when the next screen is chosen */
 void vfs_install(void);

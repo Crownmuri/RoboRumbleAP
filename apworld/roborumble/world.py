@@ -1,5 +1,7 @@
 from typing import Any, Dict, List
 
+import settings
+
 from BaseClasses import CollectionState, Item, ItemClassification, Location, Region, Tutorial
 from worlds.AutoWorld import WebWorld, World
 
@@ -18,6 +20,13 @@ class RoboRumbleItem(Item):
 
 class RoboRumbleLocation(Location):
     game = data.GAME_NAME
+
+
+class RoboRumbleSettings(settings.Group):
+    class BridgePort(int):
+        """Local port the client listens on for the game patch ([ap] port in the game's rrpatch.ini)."""
+
+    bridge_port: BridgePort = BridgePort(38480)
 
 
 class RoboRumbleWebWorld(WebWorld):
@@ -44,6 +53,7 @@ class RoboRumbleWorld(World):
     options_dataclass = RoboRumbleOptions
     options: RoboRumbleOptions
     web = RoboRumbleWebWorld()
+    settings: RoboRumbleSettings
 
     item_name_to_id = data.item_table()
     location_name_to_id = data.location_table()
