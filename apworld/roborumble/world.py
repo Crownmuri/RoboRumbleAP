@@ -68,6 +68,7 @@ class RoboRumbleWorld(World):
     options: RoboRumbleOptions
     web = RoboRumbleWebWorld()
     settings: RoboRumbleSettings
+    settings_key = "roborumble_options"
 
     item_name_to_id = data.item_table()
     location_name_to_id = data.location_table()

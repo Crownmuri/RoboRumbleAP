@@ -13,7 +13,9 @@
 3. Load or start a campaign. Talk to the robot Zuom IV (rightmost portrait in the briefing) and choose
    **Choose a mission** to pick an unlocked mission.
 
-`/unpatch` takes the patch out again. `/game` shows what the client found.
+If the game isn't found (or you want another copy), type `/path` to pick the game folder, or
+`/path D:\Games\RoBoRumble`. The client remembers it. `/unpatch` takes the patch out again, `/game` shows what the
+client found.
 
 ## GOG and Steam
 
@@ -23,5 +25,6 @@
   with the original CD in the drive the game plays the CD audio itself, or put the tracks as `Track02.ogg` ...
   `Track09.ogg` into `DATA\MUSIC`.
 
-Settings live in `DATArpatch.ini` (window size, controls, music...). In `host.yaml`, `roborumble_options` has
+Settings live in `DATA
+rpatch.ini` (window size, controls, music...). In `host.yaml`, `roborumble_options` has
 `game_path` (if the install isn't found), `renderer` and `bridge_port`.

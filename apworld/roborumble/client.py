@@ -65,13 +65,20 @@ class RoboRumbleCommandProcessor(CommandProcessor):
         """Remove the game patch from the RoboRumble folder (GOG's own winmm.dll comes back)."""
         game_path = self.ctx.game_path()
         if game_path is None:
-            self.output("RoboRumble install not found. Set roborumble_options.game_path in host.yaml.")
+            self.output("RoboRumble install not found. Type /path to choose the game folder.")
             return
         try:
             game_install.remove_patch(game_path)
             self.output("Patch removed.")
         except OSError as e:
             self.output(f"Could not remove the patch (is the game running?): {e}")
+
+    def _cmd_path(self, *folder: str) -> None:
+        """Set the RoboRumble folder (GOG or Steam). Without a folder: opens a folder picker."""
+        if folder:
+            self.ctx.set_game_path(" ".join(folder).strip('"'))
+        else:
+            Utils.async_start(self.ctx.pick_game_path())
 
     def _cmd_run(self, renderer: str = "") -> None:
         """Start RoboRumble, patching it first if needed. Optional renderer: glide, software or direct3d."""
@@ -117,10 +124,38 @@ class RoboRumbleContext(Context):
     def game_path(self) -> Optional[str]:
         return game_install.find_game_path(str(self.world_settings("game_path", "") or ""))
 
+    def set_game_path(self, folder: str) -> bool:
+        """Remembers the game folder in host.yaml (roborumble_options.game_path)."""
+        folder = os.path.normpath(folder)
+        if os.path.isfile(folder):                      # an exe was picked
+            folder = os.path.dirname(folder)
+        if os.path.basename(folder).lower() == "data":  # the DATA folder was picked
+            folder = os.path.dirname(folder)
+        if not game_install.is_game_path(folder):
+            CommonClient.logger.error(f"{folder} is not a RoboRumble folder (it should have DATA/rr_soft.exe in it).")
+            return False
+        try:
+            from settings import get_settings
+            from .world import RoboRumbleSettings, RoboRumbleWorld
+            RoboRumbleWorld.settings.game_path = RoboRumbleSettings.GamePath(folder)
+            get_settings().save()
+        except Exception as e:
+            CommonClient.logger.error(f"Could not save the folder in host.yaml: {e}")
+            return False
+        CommonClient.logger.info(f"RoboRumble folder set to {folder} "
+                                 f"({'GOG' if game_install.is_gog(folder) else 'Steam / other'}). /run starts it.")
+        return True
+
+    async def pick_game_path(self) -> None:
+        start = self.game_path() or ""
+        folder = await asyncio.to_thread(Utils.open_directory, "RoboRumble folder (GOG or Steam)", start)
+        if folder:
+            self.set_game_path(folder)
+
     def install_patch(self) -> bool:
         game_path = self.game_path()
         if game_path is None:
-            CommonClient.logger.error("RoboRumble install not found. Set roborumble_options.game_path in host.yaml.")
+            CommonClient.logger.error("RoboRumble install not found. Type /path to choose the game folder.")
             return False
         try:
             game_install.install_patch(game_path, self.port)
@@ -133,7 +168,7 @@ class RoboRumbleContext(Context):
     def launch_game(self, renderer: str = "") -> None:
         game_path = self.game_path()
         if game_path is None:
-            CommonClient.logger.error("RoboRumble install not found. Set roborumble_options.game_path in host.yaml.")
+            CommonClient.logger.error("RoboRumble install not found. Type /path to choose the game folder.")
             return
         if not game_install.is_patch_current(game_path) and not self.install_patch():
             return
