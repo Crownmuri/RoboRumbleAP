@@ -218,10 +218,29 @@ static BOOL WINAPI ng_hook_SetWindowPos(HWND h, HWND after, int x, int y, int w,
     return ng_SetWindowPos(h, after, x, y, w, hh, f);
 }
 
+/* nGlide puts its own window procedure in front of the patch's, and it doesn't pass the close on: Alt+F4 or the
+   close button only took the window away and left the process running. A guard goes in front of it again. */
+static WNDPROC g_ng_wndproc;
+static LRESULT CALLBACK close_guard_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_CLOSE || (msg == WM_SYSCOMMAND && (wp & 0xFFF0) == SC_CLOSE)) {
+        rr_log("window: closed by the user, exiting");
+        ClipCursor(NULL);
+        ExitProcess(0);
+    }
+    return CallWindowProcA(g_ng_wndproc, h, msg, wp, lp);
+}
+
 static LONG WINAPI ng_hook_SetWindowLongA(HWND h, int index, LONG v)
 {
     if (h && h == rr_game_hwnd() && (index == GWL_STYLE || index == GWL_EXSTYLE)) return GetWindowLongA(h, index);
-    return ng_SetWindowLongA(h, index, v);
+    LONG prev = ng_SetWindowLongA(h, index, v);
+    if (h && h == rr_game_hwnd() && index == GWL_WNDPROC && (WNDPROC)v != close_guard_proc) {
+        g_ng_wndproc = (WNDPROC)v;
+        ng_SetWindowLongA(h, GWL_WNDPROC, (LONG)close_guard_proc);
+        rr_log("glide: nGlide subclassed the game window, close guard in front of it");
+    }
+    return prev;
 }
 
 static BOOL WINAPI ng_hook_ShowWindow(HWND h, int cmd)

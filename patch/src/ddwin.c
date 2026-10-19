@@ -639,6 +639,23 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         }
         break;
+    case WM_NCHITTEST: case WM_NCLBUTTONDOWN: case WM_NCLBUTTONUP: case WM_NCLBUTTONDBLCLK:
+    case WM_NCRBUTTONDOWN: case WM_NCRBUTTONUP:
+        /* title bar and frame: the game's window procedure swallows these, so the close button, dragging and
+           resizing never started */
+        if (msg == WM_NCLBUTTONDOWN && wp == HTCLOSE) {
+            /* Windows doesn't turn this into a close here (the game's loop is in the way), so close at once */
+            rr_log("window: close button, exiting");
+            ClipCursor(NULL);
+            ExitProcess(0);
+        }
+        return DefWindowProcA(hwnd, msg, wp, lp);
+    case WM_CLOSE:
+        /* Alt+F4 / the close button: the game only quits from its own menu and would keep running without a
+           window, so end the process here. */
+        rr_log("window: closed by the user, exiting");
+        ClipCursor(NULL);
+        ExitProcess(0);
     case WM_SYSCOMMAND:
         /* the game swallows most system commands; let window management through */
         switch (wp & 0xFFF0) {
@@ -724,7 +741,9 @@ static BOOL WINAPI hook_GetCursorPos(LPPOINT pt)
         MapWindowPoints(g_hwnd, NULL, (POINT *)&want, 2);
         GetClipCursor(&have);
         if (g_active && !IsIconic(g_hwnd)) {
-            if (!EqualRect(&want, &have)) ClipCursor(&want);
+            /* only once the cursor is over the game: the title bar and its close button stay usable */
+            POINT cur;
+            if (!EqualRect(&want, &have) && real_GetCursorPos(&cur) && PtInRect(&want, cur)) ClipCursor(&want);
         } else if (EqualRect(&want, &have)) {
             ClipCursor(NULL);
         }

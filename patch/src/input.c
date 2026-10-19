@@ -239,6 +239,14 @@ static void log_mode(void)
 static void filter(MSG *m)
 {
     log_mode();
+    /* The game only quits from its own menu; Alt+F4 and the close button would leave it running windowless. */
+    if ((m->message == WM_SYSKEYDOWN && m->wParam == VK_F4) ||
+        (m->message == WM_NCLBUTTONUP && m->wParam == HTCLOSE) ||
+        (m->message == WM_SYSCOMMAND && (m->wParam & 0xFFF0) == SC_CLOSE)) {
+        rr_log("input: window closed by the user, exiting");
+        ClipCursor(NULL);
+        ExitProcess(0);
+    }
     if (g_pan && pan_message(m)) {
         m->message = WM_NULL;
         m->wParam = 0;
@@ -388,13 +396,11 @@ void input_install(void)
     char buf[32];
     GetPrivateProfileStringA("input", "pan_speed", "1.0", buf, sizeof buf, g_ini_path);
     g_pan_speed = (float)atof(buf);
-    if (!g_right_cmds && !g_wasd) return;
 
     if (!rr_watch_modes()) rr_log("input: mode switch not found");
     if (g_right_cmds && !install_clicks()) g_right_cmds = 0;
     if (!g_right_cmds) g_pan = 0;          /* panning lives on the right button's click */
     if (g_pan && !install_pan()) g_pan = 0;
-    if (!g_pan && !g_wasd) return;
 
     HMODULE exe = GetModuleHandleA(NULL);
     prev_PeekMessageA = rr_hook_iat(exe, "USER32.dll", "PeekMessageA", (void *)in_PeekMessageA);
