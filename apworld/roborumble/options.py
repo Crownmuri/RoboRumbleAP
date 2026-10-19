@@ -7,10 +7,12 @@ class Side(Choice):
     """
     The campaign to play. Each side has its own 16 missions and its own eight weapons and eight legs.
     Red Star: Chain Gun, Rocket Launcher, ... Nuke. Terraflux: Laser, Pulse Gun, ... Infector.
+    both: both campaigns; the goal is the final mission of each side.
     """
     display_name = "Side"
     option_red_star = 0
     option_terraflux = 1
+    option_both = 2
     default = 0
 
 
@@ -28,13 +30,24 @@ class StartingParts(Choice):
 
 class OpenMissions(Range):
     """
-    How many missions are open from the start (mission 1 always is). Every other mission needs its Mission Access
-    item; unlocked missions can be played in any order.
+    How many missions of each side are open from the start (mission 1 always is). Every other mission up to 15
+    needs its Mission Access item; unlocked missions can be played in any order.
     """
     display_name = "Open Missions"
     range_start = 1
-    range_end = 16
+    range_end = 15
     default = 1
+
+
+class FinalMissionWins(Range):
+    """
+    The final mission (16) has no access item: it opens once this many other missions of the same side are won,
+    so it can't be rushed.
+    """
+    display_name = "Wins Before the Final Mission"
+    range_start = 0
+    range_end = 15
+    default = 10
 
 
 class LogicStrictness(Choice):
@@ -105,6 +118,7 @@ class RoboRumbleOptions(PerGameCommonOptions):
     side: Side
     starting_parts: StartingParts
     open_missions: OpenMissions
+    final_mission_wins: FinalMissionWins
     logic_strictness: LogicStrictness
     booster_builds: BoosterBuilds
     combo_builds: ComboBuilds

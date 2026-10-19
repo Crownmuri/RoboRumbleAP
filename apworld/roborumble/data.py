@@ -6,13 +6,15 @@ table:
     heads (weapons)  HEAD_OFFSET + head index 0-15      (index = HeadA0-7 / HeadB0-7 of level1.ini)
     legs             LEGS_OFFSET + legs index 0-15
     boosters         BOOSTER_OFFSET + booster index 0-8 (order of the Boosters mask = the robot builder's order)
-    mission access   MISSION_OFFSET + mission number 2-16 (item)
-    mission complete MISSION_OFFSET + mission number 1-16 (location)
+    mission access   MISSION_OFFSET + 100 * side + mission number 2-15 (item; the final mission 16 has none,
+                     it opens after a number of wins, option final_mission_wins)
+    mission complete MISSION_OFFSET + 100 * side + mission number 1-16 (location)
     combo build      COMBO_OFFSET + head index * 16 + legs index (location, option combo_builds)
     base upgrades    UPGRADE_OFFSET + index 0-7 (item; order of the engineer's menu)
     inventions       INVENTION_OFFSET + index 0-2 (item)
     shop purchases   SHOP_OFFSET + booster index 0-8, + 100 + upgrade index, + 200 + invention index (locations)
-    spy hints        SPY_OFFSET + mission number 1-16 (location: buying the spy's report before that mission)
+    spy hints        SPY_OFFSET + 100 * side + mission number 1-16 (location: the spy's report before that mission)
+side: 0 = Red Star (campaign A), 1 = Terraflux (campaign B)
 The "Build" locations use the same ids as the part items they belong to.
 
 The game's save state (devui: state block S) keeps 22 "available" and 22 "owned" flags for the shop:
@@ -97,12 +99,23 @@ def side_legs(side: int) -> List[str]:
     return list(LEGS[side * 8:side * 8 + 8])
 
 
-def mission_access(number: int) -> str:
-    return f"Mission {number} Access"
+FINAL_MISSION = MISSIONS
 
 
-def mission_complete(number: int) -> str:
-    return f"Mission {number} Complete"
+def mission_access(side: int, number: int) -> str:
+    return f"{SIDES[side]} Mission {number} Access"
+
+
+def mission_complete(side: int, number: int) -> str:
+    return f"{SIDES[side]} Mission {number} Complete"
+
+
+def mission_id(side: int, number: int) -> int:
+    return MISSION_OFFSET + 100 * side + number
+
+
+def final_goal(side: int) -> str:
+    return f"{SIDES[side]}: Defeat the Aliens"
 
 
 def build_head(name: str) -> str:
@@ -137,8 +150,8 @@ def shop_invention(name: str) -> str:
     return f"Shop: {name}"
 
 
-def spy_hint(number: int) -> str:
-    return f"Spy Report Before Mission {number}"
+def spy_hint(side: int, number: int) -> str:
+    return f"{SIDES[side]} Spy Report Before Mission {number}"
 
 
 def starting_parts(side: int) -> Tuple[List[str], List[str]]:
@@ -161,8 +174,9 @@ def item_table() -> Dict[str, int]:
         table[name] = LEGS_OFFSET + i
     for i, name in enumerate(BOOSTERS):
         table[name] = BOOSTER_OFFSET + i
-    for number in range(2, MISSIONS + 1):
-        table[mission_access(number)] = MISSION_OFFSET + number
+    for side in (0, 1):
+        for number in range(2, FINAL_MISSION):
+            table[mission_access(side, number)] = mission_id(side, number)
     for i, name in enumerate(UPGRADES):
         table[name] = UPGRADE_OFFSET + i
     for i, name in enumerate(INVENTIONS):
@@ -175,8 +189,9 @@ def item_table() -> Dict[str, int]:
 
 def location_table() -> Dict[str, int]:
     table: Dict[str, int] = {}
-    for number in range(1, MISSIONS + 1):
-        table[mission_complete(number)] = MISSION_OFFSET + number
+    for side in (0, 1):
+        for number in range(1, MISSIONS + 1):
+            table[mission_complete(side, number)] = mission_id(side, number)
     for i, name in enumerate(HEADS):
         table[build_head(name)] = HEAD_OFFSET + i
     for i, name in enumerate(LEGS):
@@ -193,6 +208,7 @@ def location_table() -> Dict[str, int]:
         table[shop_upgrade(name)] = SHOP_OFFSET + 100 + i
     for i, name in enumerate(INVENTIONS):
         table[shop_invention(name)] = SHOP_OFFSET + 200 + i
-    for number in range(1, MISSIONS + 1):
-        table[spy_hint(number)] = SPY_OFFSET + number
+    for side in (0, 1):
+        for number in range(1, MISSIONS + 1):
+            table[spy_hint(side, number)] = SPY_OFFSET + 100 * side + number
     return table

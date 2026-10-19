@@ -43,11 +43,11 @@ static CRITICAL_SECTION g_cs;
 static int g_enabled, g_port;
 
 /* received from the client (under g_cs) */
-static int g_have_slot, g_side, g_open_missions;
+static int g_have_slot, g_side_mode, g_final_wins;   /* side mode 0 Red Star, 1 Terraflux, 2 both */
 static char g_seed[64];
 static int *g_items, g_nitems;
 static int *g_checked, g_nchecked;
-static int g_choose_mission;          /* MISSION n, 0 = none */
+static int g_choose_mission, g_choose_side;   /* MISSION side n, mission 0 = none */
 static volatile LONG g_dirty;         /* items/checked changed */
 
 /* outgoing lines */
@@ -120,10 +120,21 @@ static int slot_location(int slot)
     return 0;
 }
 
-static int mission_open(int n)
+static int mission_id(int side, int n) { return MISSION_OFFSET + 100 * side + n; }
+
+static int side_played(int side) { return g_side_mode == 2 || g_side_mode == side; }
+
+/* mission 1 is always open, 2-15 need their access item, the final mission a number of wins on that side */
+static int mission_open(int side, int n)
 {
-    return n == 1 || n <= g_open_missions || count_item(MISSION_OFFSET + n) > 0;
+    if (n == 1) return 1;
+    if (n < 16) return count_item(mission_id(side, n)) > 0;
+    int wins = 0;
+    for (int m = 1; m < 16; m++) wins += is_checked(mission_id(side, m));
+    return wins >= g_final_wins;
 }
+
+static int campaign_side(void) { return *(int *)G->state == 1 ? 1 : 0; }
 
 /* ---------------------------------------------------------------- applying the slot to the game */
 static BYTE g_shop_written[SHOP_SLOTS];   /* owned[] as last written in the briefing */
@@ -139,8 +150,8 @@ static char *state_path(char *buf, size_t n)
 static void apply(void)
 {
     BYTE *S = G->state;
-    int side = *(int *)S == 1 ? 1 : 0;
-    if (side != g_side) return;   /* another side's campaign: leave it alone */
+    int side = campaign_side();
+    if (!side_played(side)) return;   /* a campaign of the other side: leave it alone */
     DWORD mode = g_gui_mode;
 
     /* parts the robot builder offers */
@@ -196,12 +207,12 @@ static int g_last_spy;
 
 static int pick_mission(void)
 {
-    int cur = *(int *)(G->state + 4) + 1;
-    if (g_choose_mission && mission_open(g_choose_mission)) return g_choose_mission;
-    if (mission_open(cur) && !is_checked(MISSION_OFFSET + cur)) return cur;
+    int cur = *(int *)(G->state + 4) + 1, side = campaign_side();
+    if (g_choose_mission && g_choose_side == side && mission_open(side, g_choose_mission)) return g_choose_mission;
+    if (mission_open(side, cur) && !is_checked(mission_id(side, cur))) return cur;
     for (int n = 1; n <= 16; n++)
-        if (mission_open(n) && !is_checked(MISSION_OFFSET + n)) return n;
-    return mission_open(cur) ? cur : 1;
+        if (mission_open(side, n) && !is_checked(mission_id(side, n))) return n;
+    return mission_open(side, cur) ? cur : 1;
 }
 
 static void on_mode(DWORD mode)
@@ -211,7 +222,7 @@ static void on_mode(DWORD mode)
     if (g_mission_running && mode != RR_MODE_GAMEPLAY && mode != RR_MODE_SHOP) {
         if (*G->winflag == 1) {
             LeaveCriticalSection(&g_cs);
-            check(MISSION_OFFSET + g_mission_running);
+            check(mission_id(campaign_side(), g_mission_running));
             EnterCriticalSection(&g_cs);
         }
         g_mission_running = 0;
@@ -320,7 +331,7 @@ static void tick(void)
             if (p == -1 && g_last_spy > 0) {
                 int n = *(int *)(G->state + 4) + 1;
                 LeaveCriticalSection(&g_cs);
-                check(SPY_OFFSET + n);
+                check(SPY_OFFSET + 100 * campaign_side() + n);
                 EnterCriticalSection(&g_cs);
             }
             g_last_spy = p;
@@ -352,16 +363,16 @@ static int *parse_ids(const char *s, int *n)
 static void handle(char *line)
 {
     if (!strncmp(line, "SLOT ", 5)) {
-        int side = 0, open = 1;
+        int side = 0, final_wins = 10;
         char seed[64] = "";
-        sscanf(line + 5, "%d %d %63s", &side, &open, seed);
+        sscanf(line + 5, "%d %d %63s", &side, &final_wins, seed);
         EnterCriticalSection(&g_cs);
         if (strcmp(seed, g_seed)) g_money_applied = -1;
-        g_side = side; g_open_missions = open;
+        g_side_mode = side; g_final_wins = final_wins;
         lstrcpynA(g_seed, seed, sizeof g_seed);
         g_have_slot = 1;
         LeaveCriticalSection(&g_cs);
-        rr_log("ap: slot side %d, %d open missions, seed %s", side, open, seed);
+        rr_log("ap: slot side %d, final mission after %d wins, seed %s", side, final_wins, seed);
     } else if (!strncmp(line, "ITEMS", 5)) {
         int n, *v = parse_ids(line + 5, &n);
         EnterCriticalSection(&g_cs);
@@ -375,11 +386,13 @@ static void handle(char *line)
         LeaveCriticalSection(&g_cs);
         free(v);
     } else if (!strncmp(line, "MISSION ", 8)) {
-        int n = atoi(line + 8);
+        int side = 0, n = 0;
+        sscanf(line + 8, "%d %d", &side, &n);
         EnterCriticalSection(&g_cs);
+        g_choose_side = side;
         g_choose_mission = n >= 1 && n <= 16 ? n : 0;
         LeaveCriticalSection(&g_cs);
-        rr_log("ap: next mission %d", n);
+        rr_log("ap: next mission %d of side %d", n, side);
     } else if (!strncmp(line, "MSG ", 4)) {
         rr_log("ap: %s", line + 4);
     }

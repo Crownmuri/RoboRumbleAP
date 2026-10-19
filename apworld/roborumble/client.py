@@ -27,30 +27,34 @@ except ModuleNotFoundError:
     from CommonClient import ClientCommandProcessor as CommandProcessor
 
 DEFAULT_PORT = 38480
-GOAL_MISSION = data.MISSION_OFFSET + data.MISSIONS
 
 
 class RoboRumbleCommandProcessor(CommandProcessor):
     ctx: "RoboRumbleContext"
 
-    def _cmd_mission(self, number: str = "") -> None:
-        """Choose the mission to play next (1-16). Without a number: lists the unlocked missions."""
+    def _cmd_mission(self, number: str = "", side: str = "") -> None:
+        """Choose the mission to play next: /mission <1-16> [redstar|terraflux]. Without a number: lists them."""
         ctx = self.ctx
-        unlocked = ctx.unlocked_missions()
+        sides = ctx.sides()
         if not number:
-            done = {n for n in unlocked if data.MISSION_OFFSET + n in ctx.checked_locations}
-            self.output("Unlocked missions: " + ", ".join(f"{n}{' (won)' if n in done else ''}" for n in unlocked))
+            for s in sides:
+                unlocked = ctx.unlocked_missions(s)
+                done = {n for n in unlocked if data.mission_id(s, n) in ctx.checked_locations}
+                self.output(f"{data.SIDES[s]}: " + ", ".join(f"{n}{' (won)' if n in done else ''}" for n in unlocked))
             return
         try:
             n = int(number)
         except ValueError:
-            self.output("Usage: /mission <1-16>")
+            self.output("Usage: /mission <1-16> [redstar|terraflux]")
             return
-        if n not in unlocked:
-            self.output(f"Mission {n} is still locked.")
+        s = sides[0]
+        if side:
+            s = 1 if side.lower().startswith("t") else 0
+        if s not in sides or n not in ctx.unlocked_missions(s):
+            self.output(f"{data.SIDES[s]} mission {n} is still locked.")
             return
-        Utils.async_start(ctx.game_send(f"MISSION {n}"))
-        self.output(f"Mission {n} is played next. It takes effect when the next briefing or mission loads.")
+        Utils.async_start(ctx.game_send(f"MISSION {s} {n}"))
+        self.output(f"{data.SIDES[s]} mission {n} is played next, from the next briefing on.")
 
     def _cmd_game(self) -> None:
         """Show the state of the game connection."""
@@ -100,14 +104,22 @@ class RoboRumbleContext(Context):
             Utils.async_start(self.send_checked())
         super().on_package(cmd, args)
 
-    def unlocked_missions(self) -> List[int]:
+    def sides(self) -> List[int]:
+        side = int(self.slot_data.get("side", 0))
+        return [0, 1] if side == 2 else [side]
+
+    def unlocked_missions(self, side: int) -> List[int]:
         received = {item.item for item in self.items_received}
-        open_missions = int(self.slot_data.get("open_missions", 1))
-        return [n for n in range(1, data.MISSIONS + 1)
-                if n == 1 or n <= open_missions or data.MISSION_OFFSET + n in received]
+        wins = sum(1 for n in range(1, data.FINAL_MISSION) if data.mission_id(side, n) in self.checked_locations)
+        unlocked = [n for n in range(1, data.FINAL_MISSION) if n == 1 or data.mission_id(side, n) in received]
+        if wins >= int(self.slot_data.get("final_mission_wins", 10)):
+            unlocked.append(data.FINAL_MISSION)
+        return unlocked
 
     async def check_goal(self) -> None:
-        if self.finished_game or not self.slot or GOAL_MISSION not in self.checked_locations:
+        if self.finished_game or not self.slot:
+            return
+        if any(data.mission_id(s, data.FINAL_MISSION) not in self.checked_locations for s in self.sides()):
             return
         artifacts = sum(1 for item in self.items_received if item.item == data.ARTIFACT_ID)
         if artifacts >= int(self.slot_data.get("alien_artifacts", 0)):
@@ -129,10 +141,10 @@ class RoboRumbleContext(Context):
         if not self.slot or not self.slot_data or self.game_writer is None:
             return
         side = int(self.slot_data.get("side", 0))
-        open_missions = int(self.slot_data.get("open_missions", 1))
+        final_wins = int(self.slot_data.get("final_mission_wins", 10))
         seed_name = getattr(self, "server_seed_name", None) or self.seed_name or "seed"
         seed = "".join(c for c in seed_name if c.isalnum())[:40] + f"_{self.slot}"
-        await self.game_send(f"SLOT {side} {open_missions} {seed}")
+        await self.game_send(f"SLOT {side} {final_wins} {seed}")
         await self.send_checked()
         await self.send_items()
 
@@ -153,7 +165,7 @@ class RoboRumbleContext(Context):
             location = int(rest)
             if location in self.missing_locations or location in self.checked_locations:
                 await self.check_locations([location])
-                if data.SPY_OFFSET < location <= data.SPY_OFFSET + data.MISSIONS and \
+                if data.SPY_OFFSET < location <= data.SPY_OFFSET + 100 + data.MISSIONS and \
                         int(self.slot_data.get("spy_checks", 0)) == 2:
                     await self.spy_hint()
                 await self.check_goal()
