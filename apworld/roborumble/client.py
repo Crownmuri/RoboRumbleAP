@@ -5,6 +5,7 @@ The patch connects to this client on 127.0.0.1:<bridge_port> and both sides send
 protocol): the client sends the slot, every received item and the checked locations; the game sends checks.
 """
 import asyncio
+import os
 import random
 import sys
 import urllib.parse
@@ -14,7 +15,7 @@ from typing import Any, Dict, List, Optional, Set
 import CommonClient
 import Utils
 
-from . import data
+from . import data, game_install
 
 tracker_loaded = False
 try:
@@ -56,9 +57,35 @@ class RoboRumbleCommandProcessor(CommandProcessor):
         Utils.async_start(ctx.game_send(f"MISSION {s} {n}"))
         self.output(f"{data.SIDES[s]} mission {n} is played next, from the next briefing on.")
 
+    def _cmd_patch(self) -> None:
+        """Install the game patch (winmm.dll) into the RoboRumble folder and switch Archipelago on in it."""
+        self.ctx.install_patch()
+
+    def _cmd_unpatch(self) -> None:
+        """Remove the game patch from the RoboRumble folder (GOG's own winmm.dll comes back)."""
+        game_path = self.ctx.game_path()
+        if game_path is None:
+            self.output("RoboRumble install not found. Set roborumble_options.game_path in host.yaml.")
+            return
+        try:
+            game_install.remove_patch(game_path)
+            self.output("Patch removed.")
+        except OSError as e:
+            self.output(f"Could not remove the patch (is the game running?): {e}")
+
+    def _cmd_run(self, renderer: str = "") -> None:
+        """Start RoboRumble, patching it first if needed. Optional renderer: glide, software or direct3d."""
+        self.ctx.launch_game(renderer)
+
     def _cmd_game(self) -> None:
         """Show the state of the game connection."""
         ctx = self.ctx
+        game_path = ctx.game_path()
+        self.output(f"Install: {game_path or 'not found'}")
+        if game_path:
+            self.output(f"Release: {'GOG' if game_install.is_gog(game_path) else 'Steam / other'}, "
+                        f"patch up to date: {game_install.is_patch_current(game_path)}, "
+                        f"default renderer: {game_install.default_renderer(game_path)}")
         self.output(f"Game connected: {ctx.game_writer is not None} (port {ctx.port})")
         if ctx.game_state:
             self.output(f"Game mode {ctx.game_state[0]}, mission {ctx.game_state[1]}")
@@ -74,15 +101,57 @@ class RoboRumbleContext(Context):
     def __init__(self, server_address: Optional[str], password: Optional[str]) -> None:
         super().__init__(server_address, password)
         self.slot_data: Dict[str, Any] = {}
-        self.port = DEFAULT_PORT
-        try:
-            from .world import RoboRumbleWorld
-            self.port = int(getattr(RoboRumbleWorld.settings, "bridge_port", DEFAULT_PORT))
-        except Exception:
-            pass
+        self.port = int(self.world_settings("bridge_port", DEFAULT_PORT))
         self.game_writer: Optional[asyncio.StreamWriter] = None
         self.game_server: Optional[asyncio.AbstractServer] = None
         self.game_state: Optional[List[int]] = None
+
+    @staticmethod
+    def world_settings(key: str, default: Any) -> Any:
+        try:
+            from .world import RoboRumbleWorld
+            return getattr(RoboRumbleWorld.settings, key)
+        except Exception:
+            return default
+
+    def game_path(self) -> Optional[str]:
+        return game_install.find_game_path(str(self.world_settings("game_path", "") or ""))
+
+    def install_patch(self) -> bool:
+        game_path = self.game_path()
+        if game_path is None:
+            CommonClient.logger.error("RoboRumble install not found. Set roborumble_options.game_path in host.yaml.")
+            return False
+        try:
+            game_install.install_patch(game_path, self.port)
+        except (OSError, RuntimeError) as e:
+            CommonClient.logger.error(f"Could not install the patch (is the game running?): {e}")
+            return False
+        CommonClient.logger.info(f"Patch installed into {os.path.join(game_path, 'DATA')}.")
+        return True
+
+    def launch_game(self, renderer: str = "") -> None:
+        game_path = self.game_path()
+        if game_path is None:
+            CommonClient.logger.error("RoboRumble install not found. Set roborumble_options.game_path in host.yaml.")
+            return
+        if not game_install.is_patch_current(game_path) and not self.install_patch():
+            return
+        renderer = (renderer or str(self.world_settings("renderer", "auto") or "auto")).lower()
+        if renderer == "auto":
+            renderer = game_install.default_renderer(game_path)
+        if renderer not in game_install.RENDERERS:
+            CommonClient.logger.error("Renderer must be glide, software or direct3d.")
+            return
+        if renderer == "glide" and not game_install.has_glide_wrapper(game_path):
+            CommonClient.logger.warning("No Glide wrapper found (install nGlide); starting the software renderer.")
+            renderer = "software"
+        try:
+            game_install.launch(game_path, renderer)
+        except OSError as e:
+            CommonClient.logger.error(f"Could not start the game: {e}")
+            return
+        CommonClient.logger.info(f"Starting RoboRumble ({renderer}).")
 
     # ------------------------------------------------------------ server side
     async def server_auth(self, password_requested: bool = False):

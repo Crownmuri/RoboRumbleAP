@@ -25,9 +25,17 @@ class RoboRumbleLocation(Location):
 
 
 class RoboRumbleSettings(settings.Group):
+    class GamePath(str):
+        """RoboRumble install folder (the one with DATA in it). Leave empty to find the GOG or Steam install."""
+
+    class Renderer(str):
+        """Renderer /run starts: auto (Glide if a Glide wrapper is there, else software), glide, software, direct3d."""
+
     class BridgePort(int):
         """Local port the client listens on for the game patch ([ap] port in the game's rrpatch.ini)."""
 
+    game_path: GamePath = GamePath("")
+    renderer: Renderer = Renderer("auto")
     bridge_port: BridgePort = BridgePort(38480)
 
 

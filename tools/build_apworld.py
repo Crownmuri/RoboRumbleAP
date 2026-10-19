@@ -1,5 +1,5 @@
 """
-Packs apworld/roborumble into build/roborumble.apworld.
+Packs apworld/roborumble and the game patch (patch/build/winmm.dll) into build/roborumble.apworld.
 
     python tools/build_apworld.py
     python tools/build_apworld.py --install "D:\\Games\\Randomizer\\Archipelago\\custom_worlds"
@@ -22,6 +22,12 @@ def build() -> Path:
         for path in sorted(WORLD.rglob("*")):
             if path.is_file() and "__pycache__" not in path.parts:
                 apworld.write(path, Path("roborumble") / path.relative_to(WORLD))
+        # the game patch, which the client's /patch and /run install
+        dll = REPO / "patch" / "build" / "winmm.dll"
+        if not dll.is_file():
+            raise SystemExit("patch/build/winmm.dll is missing: run sh patch/build.sh first")
+        apworld.write(dll, "roborumble/patch/winmm.dll")
+        apworld.write(REPO / "patch" / "rrpatch.ini", "roborumble/patch/rrpatch.ini")
 
     return OUTPUT
 
