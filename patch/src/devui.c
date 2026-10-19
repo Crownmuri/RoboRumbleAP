@@ -234,7 +234,7 @@ static const char *k_legs[2][8] = {
 };
 /* Boosters mask order, as the shop lists them. The last three are pick-two-of-three. */
 static const char *k_boosters[9] = { "Speed", "Turn Speed", "Fire Power", "Fire Range", "Fire Frequency", "Shield",
-                                     "Camouflage", "Maximum Defense", "Maximum Weapon" };
+                                     "Camouflage", "Maximum Weapon", "Maximum Defense" };
 
 enum {
     ID_STATE = 100, ID_SIDE, ID_LEVEL, ID_MONEY, ID_SET_SIDE, ID_SET_LEVEL, ID_SET_MONEY,

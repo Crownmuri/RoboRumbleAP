@@ -54,12 +54,13 @@ BOOSTERS: Tuple[str, ...] = (
     "Speed Booster", "Turn Speed Booster", "Fire Power Booster", "Fire Range Booster", "Fire Frequency Booster",
     "Shield", "Camouflage", "Maximum Weapon Booster", "Maximum Defense Booster",
 )
-# The engineer's "base enhancement" menu (nls\lang.ini 770-777)
+# The engineer's "base enhancement" menu (nls\lang.ini 770-777) = shop slots U1-U8 (U9/U10 unused). They come in
+# pairs: a new campaign offers U1, U3, U5 and U7; buying one makes the next slot (U2, U4, U6, U8) available.
 UPGRADES: Tuple[str, ...] = (
     "Faster Production", "Cheaper Production", "Base Energy +10%", "Base Regeneration",
     "Stronger Energy Explosions", "Wider Energy Explosions", "Explosions Recharge Robos", "Enemy Explosions Spare 1%",
 )
-# The engineer's secret inventions
+# The engineer's secret inventions, slots S1-S3, sold in this order ("surprise me")
 INVENTIONS: Tuple[str, ...] = (
     "Robo Intelligence Enhancer",   # robos target the enemy with the least energy first
     "Robo Spawn Protection",        # indestructible for 10 s after production
