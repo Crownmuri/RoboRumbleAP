@@ -35,6 +35,7 @@
 
 == Red Star Mission 1 ==
 # The enemy waits until you come close. Guide: 5x Rocket Launcher with Shield or Fire Frequency.
+# Hidden rule (game code): the mission is lost when 3 of your robos are destroyed.
 need: damage weapon
 recommended: Rocket Launcher | Chain Gun
 
@@ -145,8 +146,11 @@ recommended: Speed Booster | Maximum Defense Booster
 == Terraflux Mission 1 ==
 # Kill every enemy robo. Guide: 1x Laser lures the Homing Missiles out, 6x Eraser/Fire Frequency wait at the
 # corridor.
-need: damage weapon
-recommended: Eraser | Laser
+# Hidden rule (game code): the mission is lost when 2 of your robos are destroyed. Tested 2026-10-20: Lasers,
+# Whirlwinds, Nitrogrenades and Maximum Defense on Jet-Cars lost twice; the Erasers (shooting through the
+# corridor's walls) are what makes it work.
+need: Eraser
+recommended: Laser
 
 == Terraflux Mission 2 ==
 # Chain Guns from the right, Homing Missiles from the center. Guide: 6+ Pulse Gun/Fire Frequency and a Laser.
@@ -155,6 +159,7 @@ recommended: Pulse Gun
 recommended: Fire Frequency Booster | Shield
 
 == Terraflux Mission 3 ==
+# Hidden rule (game code): lost when a certain unit or building of yours is destroyed (not identified yet).
 # The base is under fire at once. Guide: Pulse Gun/2-Legs/Fire Range ("must have"), faster and cheaper
 # production.
 need: Pulse Gun | Laser | Eraser
