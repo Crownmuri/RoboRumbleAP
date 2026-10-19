@@ -26,6 +26,9 @@ void ap_set_mission(int side, int n);
 int ap_goal_done(void);
 void ap_epilogue_watched(void);
 int ap_artifacts_missing(void);
+void ap_shop_label(int slot, char *out, int size);
+int ap_shop_slot_state(int slot);
+void ap_shop_opened(void);
 static char *g_choice_text;   /* the choices' texts, 0x8c each */
 static void (__cdecl *g_outro)(void);   /* the game's ending: fade out, outro2.avi */
 static int g_epilogue;
@@ -222,6 +225,169 @@ static char *mission_lists(char *buf, size_t *len, size_t *cap)
     return buf;
 }
 
+/* ---------------------------------------------------------------- the engineer's shop
+   The engineer's script (a-proffs.dlg / b-proffs.dlg) gets, with Archipelago on:
+   - AP_SHOP set when his menu opens: the client hints what the shop's goods are
+   - the price question naming what you get ("That would be |AP_ITEM. I want |PRICE..."), also for the secret
+     inventions, and a short line instead of the invention's story after buying one
+   |AP_ITEM is filled in by the hooked text token function below. */
+static const char *k_proffs_script =
+    "\n"
+    ":P_ap_price\n"
+    "TALKER\n"
+    "  >>P_price_answer\n"
+    "    That would be |AP_ITEM.\n"
+    "    I want |PRICE for it. Agreed?\n"
+    "\n"
+    ":P_ap_secret\n"
+    "TALKER\n"
+    "  >>P_acquired_secret\n"
+    "    My secret invention is...\n"
+    "    |AP_ITEM!\n";
+
+/* the text after the first `marker` gets `text` inserted; 0 if the marker isn't there */
+static int insert_after(char **buf, const char *marker, const char *text)
+{
+    char *at = strstr(*buf, marker);
+    if (!at) return 0;
+    size_t head = at - *buf + strlen(marker), tl = strlen(text), rest = strlen(*buf) - head;
+    char *out = malloc(head + tl + rest + 1);
+    memcpy(out, *buf, head);
+    memcpy(out + head, text, tl);
+    memcpy(out + head + tl, *buf + head, rest + 1);
+    free(*buf);
+    *buf = out;
+    return 1;
+}
+
+static char *with_line_ends(const char *text, int crlf, size_t *outlen);
+
+static void generate_proffs(const char *name)
+{
+    DWORD size = 0;
+    char *src = rr_pak_read("pak\\nls.pak", name, &size);
+    if (!src) { rr_log("ap: %s not found, shop texts unchanged", name); return; }
+    int crlf = strstr(src, "\r\n") != NULL;
+    size_t n;
+    static const char *const edits[][2] = {
+        { ":P_inventions\nSWITCH\n", "SETVARIABLE AP_SHOP 1\n" },
+        { ":P_price\nSWITCH\n", "IF AP_ON = 1 THEN P_ap_price\n" },
+        { ":P_price_accepted_surprise_1\n",
+          "SWITCH\nIF AP_ON = 1 THEN P_ap_secret\nGOTO P_price_accepted_surprise_1v\n\n:P_price_accepted_surprise_1v\n" },
+        { ":P_price_accepted_surprise_2\n",
+          "SWITCH\nIF AP_ON = 1 THEN P_ap_secret\nGOTO P_price_accepted_surprise_2v\n\n:P_price_accepted_surprise_2v\n" },
+        { ":P_price_accepted_surprise_3\n",
+          "SWITCH\nIF AP_ON = 1 THEN P_ap_secret\nGOTO P_price_accepted_surprise_3v\n\n:P_price_accepted_surprise_3v\n" },
+    };
+    int done = 0;
+    for (size_t i = 0; i < sizeof edits / sizeof *edits; i++) {
+        char *m = with_line_ends(edits[i][0], crlf, &n), *t = with_line_ends(edits[i][1], crlf, &n);
+        done += insert_after(&src, m, t);
+        free(m);
+        free(t);
+    }
+    char *tail = with_line_ends(k_proffs_script, crlf, &n);
+    size_t len = strlen(src);
+    src = realloc(src, len + n + 1);
+    memcpy(src + len, tail, n + 1);
+    free(tail);
+    if (rr_vfs_generate(name, src, (DWORD)strlen(src))) rr_log("ap: shop texts in %s (%d of 5 places)", name, done);
+    free(src);
+}
+
+/* What is being bought (the shop's purchase state): price, then +0x0C upgrade index, +0x10 booster index,
+   +0x14 invention index, +0x18 kind (0 booster, 1 invention, 2 upgrade) */
+static BYTE *g_purchase;
+
+/* The game fills "|NAME" in dialog texts through one function (eax = output, edx = NAME). AP_ITEM is ours. */
+void *g_token_resume;
+int __cdecl ap_token(char *out, const char *name)
+{
+    if (strcmp(name, "AP_ITEM") || !g_purchase) return 0;
+    int kind = *(int *)(g_purchase + 0x18), slot = -1;
+    if (kind == 0) slot = *(int *)(g_purchase + 0x10);
+    else if (kind == 1) slot = 19 + *(int *)(g_purchase + 0x14);
+    else if (kind == 2) slot = 9 + *(int *)(g_purchase + 0x0C);
+    char text[64];
+    ap_shop_label(slot, text, sizeof text);
+    lstrcpynA(out, text[0] ? text : "something new", 64);
+    return 1;
+}
+__asm__(
+    ".text\n"
+    ".globl _token_stub\n"
+    "_token_stub:\n"
+    "    pushal\n"
+    "    pushl %edx\n"
+    "    pushl %eax\n"
+    "    call _ap_token\n"
+    "    addl $8, %esp\n"
+    "    testl %eax, %eax\n"
+    "    popal\n"
+    "    jnz 1f\n"
+    "    pushl %edi\n"
+    "    pushl %esi\n"
+    "    pushl %ebp\n"
+    "    pushl %ebx\n"
+    "    subl $0x134, %esp\n"
+    "    jmp *_g_token_resume\n"
+    "1:  ret\n");
+void token_stub(void);
+
+static void shop_install(void)
+{
+    static const BYTE token[] = { 0x57, 0x56, 0x55, 0x53, 0x81, 0xEC, 0x34, 0x01, 0x00, 0x00, 0x8B, 0xDA, 0x8B, 0xEC,
+                                  0x83, 0xC5, 0x7C, 0x89, 0x84, 0x24, 0x2C, 0x01, 0x00, 0x00, 0xBE };
+    BYTE *fn = rr_find_unique(token, sizeof token);
+    if (fn) {
+        g_token_resume = fn + 10;
+        if (!rr_write_jmp(fn, (void *)token_stub, 10)) fn = NULL;
+    }
+    /* booster purchase: xor edx,edx; mov [shown price],eax; mov [price],eax; mov eax,[..]; mov [kind],edx;
+       mov [ebp-2Ch],eax; mov [booster],esi */
+    BYTE *base = (BYTE *)GetModuleHandleA(NULL);
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(nt);
+    for (int i = 0; i < nt->FileHeader.NumberOfSections && !g_purchase; i++, sec++) {
+        if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 40;
+        for (; p < end; p++) {
+            if (p[0] != 0x33 || p[1] != 0xD2 || p[2] != 0xA3 || p[7] != 0xA3 || p[12] != 0xA1 || p[17] != 0x89 ||
+                p[18] != 0x15 || p[23] != 0x89 || p[24] != 0x45 || p[25] != 0xD4 || p[26] != 0x89 || p[27] != 0x35)
+                continue;
+            DWORD price = *(DWORD *)(p + 8);
+            if (*(DWORD *)(p + 19) == price + 0x18 && *(DWORD *)(p + 28) == price + 0x10) {
+                g_purchase = (BYTE *)price;
+                break;
+            }
+        }
+    }
+    rr_log("ap: shop texts: token function %p, purchase %p", (void *)fn, (void *)g_purchase);
+}
+
+/* Shop lists on screen: each good shows what buying it sends, greyed once bought (Camouflage too is sold at any
+   time; the game's own rule needs exactly one Maximum booster and mission 14). */
+static void shop_lists(void)
+{
+    if (!g_choice_count || !g_choice_labels || !g_choice_greyed) return;
+    int n = *g_choice_count;
+    if (n < 0) n = -n;
+    if (n > 24) n = 24;
+    for (int i = 0; i < n; i++) {
+        const char *label = g_choice_labels + i * 0x28;
+        int slot;
+        if (!strncmp(label, "buy_booster_", 12)) slot = atoi(label + 12);
+        else if (!strncmp(label, "buy_base_upgrade_", 17)) slot = 9 + atoi(label + 17);
+        else continue;
+        int state = ap_shop_slot_state(slot);
+        if (state < 0) continue;
+        g_choice_greyed[i] = state;
+        char text[64];
+        ap_shop_label(slot, text, sizeof text);
+        if (g_choice_text && text[0]) lstrcpynA(g_choice_text + i * 0x8c, text, 0x8c);
+    }
+}
+
 /* "\n" -> the file's own line ends */
 static char *with_line_ends(const char *text, int crlf, size_t *outlen)
 {
@@ -296,6 +462,9 @@ void apdlg_generate(void)
     free(script);
 
     if (rr_vfs_generate("common.dlg", out, (DWORD)len)) rr_log("ap: mission menu added to common.dlg");
+    generate_proffs("a-proffs.dlg");
+    generate_proffs("b-proffs.dlg");
+    shop_install();
     free(out);
     free(src);
 }
@@ -513,6 +682,11 @@ void apdlg_tick(void)
     set_var("AP_GOAL", ap_goal_done());
     set_var("AP_ARTGOAL", ap_artifacts_missing() >= 0);
     grey_locked(side_mode);
+    if (side_mode >= 0) shop_lists();
+    if (get_var("AP_SHOP", 0)) {
+        set_var("AP_SHOP", 0);
+        if (side_mode >= 0) ap_shop_opened();
+    }
 
     /* money changed behind the game's back (Shop Money, dev window): the background with the old amount is still on
        one of the buffers, so it is drawn again */

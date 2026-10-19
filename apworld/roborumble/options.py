@@ -137,6 +137,14 @@ class SpyChecks(Choice):
     default = 1
 
 
+class BonusChecks(DefaultOnToggle):
+    """
+    The mission report's bonuses are checks: Time Bonus, Energy Bonus and Efficiency Bonus of each mission 1-15
+    (matching or beating the mission's record). They never hold progression items.
+    """
+    display_name = "Report Bonus Checks"
+
+
 class AlienArtifacts(Range):
     """With the alien artifact goals, how many Alien Artifacts are needed."""
     display_name = "Alien Artifacts Required"
@@ -216,6 +224,7 @@ class RoboRumbleOptions(PerGameCommonOptions):
     combo_builds: ComboBuilds
     shop_checks: ShopChecks
     spy_checks: SpyChecks
+    bonus_checks: BonusChecks
     alien_artifacts: AlienArtifacts
     extra_artifacts: ExtraArtifacts
     trap_percentage: TrapPercentage

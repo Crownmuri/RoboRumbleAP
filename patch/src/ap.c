@@ -35,6 +35,7 @@
 #define COMBO_OFFSET 6000
 #define SHOP_OFFSET 7000
 #define SPY_OFFSET 7300
+#define BONUS_OFFSET 7500   /* + 100 * side + 20 * kind (0 time, 1 base energy, 2 efficiency) + mission */
 
 #define SHOP_SLOTS 22   /* 9 boosters, U1-U10, S1-S3 */
 #define SHOP_MONEY 500000
@@ -52,6 +53,12 @@ static int *g_items, g_nitems;
 static int *g_checked, g_nchecked;
 static int g_choose_mission, g_choose_side;   /* MISSION side n, mission 0 = none */
 static volatile LONG g_dirty;         /* items/checked changed */
+
+/* the shop's goods as the client scouted them: "Rocket Launcher for Alice" (under g_cs) */
+static char g_shop_label[SHOP_SLOTS][64];
+
+/* the mission report's bonuses, set when a mission is won (time, efficiency, base energy) */
+static int *g_bonus_time, *g_bonus_efficiency, *g_bonus_energy;
 
 /* outgoing lines */
 static char g_out[64][96];
@@ -209,6 +216,26 @@ static void apply(void)
 }
 
 /* ---------------------------------------------------------------- for the dialogs (apdlg.c) */
+/* shop slot: what buying it sends ("" if not scouted), whether it is a check and whether that is done */
+void ap_shop_label(int slot, char *out, int size)
+{
+    out[0] = 0;
+    if (slot < 0 || slot >= SHOP_SLOTS) return;
+    EnterCriticalSection(&g_cs);
+    if (g_have_slot && slot_location(slot)) lstrcpynA(out, g_shop_label[slot], size);
+    LeaveCriticalSection(&g_cs);
+}
+int ap_shop_slot_state(int slot)   /* -1 no check, 0 open, 1 done */
+{
+    if (slot < 0 || slot >= SHOP_SLOTS) return -1;
+    EnterCriticalSection(&g_cs);
+    int loc = g_have_slot ? slot_location(slot) : 0;
+    int state = !loc ? -1 : is_checked(loc) ? 1 : 0;
+    LeaveCriticalSection(&g_cs);
+    return state;
+}
+void ap_shop_opened(void) { send_line("SHOP"); }
+
 int ap_side_mode(void) { return g_have_slot ? g_side_mode : -1; }
 int ap_campaign_side(void) { return campaign_side(); }
 
@@ -400,6 +427,13 @@ static void on_mode(DWORD mode)
     if (won) {
         rr_log("ap: mission %d of side %d won", won, side_now);
         check(mission_id(side_now, won));
+        /* the report's bonuses: paid for beating (or matching) the mission's records */
+        if (g_bonus_time && won < 16) {
+            int bonus[3] = { *g_bonus_time, *g_bonus_energy, *g_bonus_efficiency };
+            rr_log("ap: bonuses time %d energy %d efficiency %d", bonus[0], bonus[1], bonus[2]);
+            for (int k = 0; k < 3; k++)
+                if (bonus[k] > 0) check(BONUS_OFFSET + 100 * side_now + 20 * k + won);
+        }
     }
     send_line("STATE %lu %d", mode, *level + 1);
 }
@@ -676,6 +710,14 @@ static void handle(char *line)
             rr_log("ap: goal reached");
             queue_message("Archipelago goal reached! The robot has the epilogue for you.");
         }
+    } else if (!strncmp(line, "SHOPITEM ", 9)) {
+        /* SHOPITEM slot flags text: what buying that slot sends */
+        int slot = -1, flags = 0, used = 0;
+        if (sscanf(line + 9, "%d %d %n", &slot, &flags, &used) >= 2 && slot >= 0 && slot < SHOP_SLOTS && used) {
+            EnterCriticalSection(&g_cs);
+            lstrcpynA(g_shop_label[slot], line + 9 + used, sizeof g_shop_label[0]);
+            LeaveCriticalSection(&g_cs);
+        }
     } else if (!strncmp(line, "MSG ", 4)) {
         rr_log("ap: %s", line + 4);
         queue_message(line + 4);
@@ -785,6 +827,33 @@ void ap_install(void)
         g_built_resume = built + 6;
         rr_write_jmp(built, (void *)built_stub, 6);
     } else rr_log("ap: robot spawn code not found, no build checks");
+
+    /* the report's bonuses, summed into the money: mov eax,[time]; mov edx,[efficiency]; add eax,edx;
+       mov edx,[energy]; add eax,edx; mov edx,[money]; add eax,edx */
+    {
+        BYTE pat[] = { 0xA1, 0, 0, 0, 0, 0x8B, 0x15, 0, 0, 0, 0, 0x03, 0xC2, 0x8B, 0x15, 0, 0, 0, 0, 0x03, 0xC2,
+                       0x8B, 0x15, 0, 0, 0, 0, 0x03, 0xC2 };
+        *(DWORD *)(pat + 23) = (DWORD)G->state + 8;
+        BYTE *base = (BYTE *)GetModuleHandleA(NULL);
+        IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+        IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(nt);
+        for (int i = 0; i < nt->FileHeader.NumberOfSections && !g_bonus_time; i++, sec++) {
+            if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+            BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - sizeof pat;
+            for (; p < end; p++) {
+                int k = 0;
+                while (k < (int)sizeof pat && ((k >= 1 && k < 5) || (k >= 7 && k < 11) || (k >= 15 && k < 19) ||
+                                               p[k] == pat[k])) k++;
+                if (k == (int)sizeof pat) {
+                    g_bonus_time = *(int **)(p + 1);
+                    g_bonus_efficiency = *(int **)(p + 7);
+                    g_bonus_energy = *(int **)(p + 15);
+                    break;
+                }
+            }
+        }
+        rr_log("ap: report bonuses %p %p %p", (void *)g_bonus_time, (void *)g_bonus_efficiency, (void *)g_bonus_energy);
+    }
 
     /* the report's three record lookups: mov reg,[side]; mov reg,[level]; shl reg,4; ...; lea reg,[..-1];
        mov reg,[reg*4+records] -> read g_report_level instead of the level */

@@ -2,7 +2,7 @@ from typing import Any, Dict, List
 
 import settings
 
-from BaseClasses import CollectionState, Item, ItemClassification, Location, Region, Tutorial
+from BaseClasses import CollectionState, Item, ItemClassification, Location, LocationProgressType, Region, Tutorial
 from worlds.AutoWorld import WebWorld, World
 
 from . import data, logic
@@ -10,7 +10,7 @@ from .options import RoboRumbleOptions
 
 SLOT_DATA_OPTIONS = (
     "side", "starting_side", "starting_parts", "starting_weapons", "goal", "open_missions", "final_mission_wins", "logic_strictness", "booster_builds",
-    "combo_builds", "shop_checks", "spy_checks", "alien_artifacts", "extra_artifacts", "trap_percentage", "death_link",
+    "combo_builds", "shop_checks", "spy_checks", "bonus_checks", "alien_artifacts", "extra_artifacts", "trap_percentage", "death_link",
 )
 
 VICTORY = "Victory"
@@ -89,6 +89,8 @@ class RoboRumbleWorld(World):
         "Builds": {data.build_head(n) for n in data.HEADS} | {data.build_legs(n) for n in data.LEGS},
         "Booster Builds": {data.build_booster(n) for n in data.BOOSTERS},
         "Combo Builds": set(data.side_combos(0) + data.side_combos(1)),
+        "Report Bonuses": {data.bonus(s, n, k) for s in (0, 1) for n in range(1, data.BONUS_MISSIONS + 1)
+                           for k in range(len(data.BONUS_KINDS))},
         "Shop": {data.shop_booster(n) for n in data.BOOSTERS} | {data.shop_upgrade(n) for n in data.UPGRADES}
         | {data.shop_invention(n) for n in data.INVENTIONS},
         "Spy Reports": {data.spy_hint(s, n) for s in (0, 1) for n in range(1, data.MISSIONS + 1)},
@@ -211,6 +213,9 @@ class RoboRumbleWorld(World):
                 names += data.side_combos(side)
             if self.options.spy_checks:
                 names += [data.spy_hint(side, n) for n in range(1, data.MISSIONS + 1)]
+            if self.options.bonus_checks:
+                names += [data.bonus(side, n, k) for n in range(1, data.BONUS_MISSIONS + 1)
+                          for k in range(len(data.BONUS_KINDS))]
         if self.options.booster_builds:
             names += [data.build_booster(n) for n in data.BOOSTERS]
         if self.options.shop_checks:
@@ -218,6 +223,12 @@ class RoboRumbleWorld(World):
             names += [data.shop_upgrade(n) for n in data.UPGRADES]
             names += [data.shop_invention(n) for n in data.INVENTIONS]
         campaign.add_locations({name: self.location_name_to_id[name] for name in names}, RoboRumbleLocation)
+        if self.options.bonus_checks:
+            # which robots beat the records isn't known yet: no progression there
+            for side in self.sides:
+                for n in range(1, data.BONUS_MISSIONS + 1):
+                    for k in range(len(data.BONUS_KINDS)):
+                        self.get_location(data.bonus(side, n, k)).progress_type = LocationProgressType.EXCLUDED
 
         if self.options.goal == "alien_artifacts_only":
             need = self.options.alien_artifacts.value
@@ -287,6 +298,11 @@ class RoboRumbleWorld(World):
                 for number in range(1, data.MISSIONS + 1):
                     self.get_location(data.spy_hint(side, number)).access_rule = (
                         lambda state, s=side, n=number: self.mission_open(state, s, n))
+            if self.options.bonus_checks:
+                for number in range(1, data.BONUS_MISSIONS + 1):
+                    for kind in range(len(data.BONUS_KINDS)):
+                        self.get_location(data.bonus(side, number, kind)).access_rule = (
+                            lambda state, s=side, n=number: self.can_play(state, s, n))
             for name in data.side_heads(side):
                 self.get_location(data.build_head(name)).access_rule = (
                     lambda state, n=name, s=side: state.has(n, player) and self.side_reachable(state, s))
@@ -302,14 +318,7 @@ class RoboRumbleWorld(World):
         if self.options.booster_builds:
             for name in data.BOOSTERS:
                 self.get_location(data.build_booster(name)).access_rule = lambda state, n=name: state.has(n, player)
-        if self.options.shop_checks:
-            # Shop money comes from won missions; loosely: the dearer goods after a few missions are open
-            for name in data.BOOSTERS:
-                self.get_location(data.shop_booster(name)).access_rule = lambda state: self.missions_open(state, 1)
-            for name in data.UPGRADES:
-                self.get_location(data.shop_upgrade(name)).access_rule = lambda state: self.missions_open(state, 3)
-            for name in data.INVENTIONS:
-                self.get_location(data.shop_invention(name)).access_rule = lambda state: self.missions_open(state, 5)
+        # The shop's goods are in logic from the start: haggling can get any of them for free.
 
     def fill_slot_data(self) -> Dict[str, Any]:
         slot = {name: getattr(self.options, name).value for name in SLOT_DATA_OPTIONS}

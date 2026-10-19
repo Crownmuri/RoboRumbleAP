@@ -15,6 +15,8 @@ table:
     inventions       INVENTION_OFFSET + index 0-2 (item)
     shop purchases   SHOP_OFFSET + booster index 0-8, + 100 + upgrade index, + 200 + invention index (locations)
     spy hints        SPY_OFFSET + 100 * side + mission number 1-16 (location: the spy's report before that mission)
+    report bonuses   BONUS_OFFSET + 100 * side + 20 * kind + mission number 1-15 (kind 0 time, 1 base energy,
+                     2 efficiency: the mission report's bonus for matching or beating that record)
 side: 0 = Red Star (campaign A), 1 = Terraflux (campaign B)
 The "Build" locations use the same ids as the part items they belong to.
 
@@ -33,6 +35,7 @@ FILLER_OFFSET = 5000
 COMBO_OFFSET = 6000
 SHOP_OFFSET = 7000
 SPY_OFFSET = 7300
+BONUS_OFFSET = 7500
 UPGRADE_OFFSET = 3100
 INVENTION_OFFSET = 3200
 ARTIFACT_ID = 5100
@@ -177,6 +180,18 @@ def spy_hint(side: int, number: int) -> str:
     return f"{tag(side)} Mission {number} - Spy Report"
 
 
+BONUS_KINDS = ("Time", "Energy", "Efficiency")
+BONUS_MISSIONS = MISSIONS - 1   # the final mission has no report
+
+
+def bonus(side: int, number: int, kind: int) -> str:
+    return f"{tag(side)} Mission {number} - {BONUS_KINDS[kind]} Bonus"
+
+
+def bonus_id(side: int, number: int, kind: int) -> int:
+    return BONUS_OFFSET + 100 * side + 20 * kind + number
+
+
 def starting_parts(side: int) -> Tuple[List[str], List[str]]:
     """The heads and legs the first mission of a side gives in the original game."""
     heads = [side_heads(side)[i] for i, c in enumerate(VANILLA_HEADS[side][0]) if c == "+"]
@@ -236,4 +251,8 @@ def location_table() -> Dict[str, int]:
     for side in (0, 1):
         for number in range(1, MISSIONS + 1):
             table[spy_hint(side, number)] = SPY_OFFSET + 100 * side + number
+    for side in (0, 1):
+        for number in range(1, BONUS_MISSIONS + 1):
+            for kind in range(len(BONUS_KINDS)):
+                table[bonus(side, number, kind)] = bonus_id(side, number, kind)
     return table
