@@ -25,6 +25,5 @@ client found.
   with the original CD in the drive the game plays the CD audio itself, or put the tracks as `Track02.ogg` ...
   `Track09.ogg` into `DATA\MUSIC`.
 
-Settings live in `DATA
-rpatch.ini` (window size, controls, music...). In `host.yaml`, `roborumble_options` has
+Settings live in `DATA\rrpatch.ini` (window size, controls, music...). In `host.yaml`, `roborumble_options` has
 `game_path` (if the install isn't found), `renderer` and `bridge_port`.
