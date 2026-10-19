@@ -114,7 +114,7 @@ class RoboRumbleContext(Context):
         self.game_server: Optional[asyncio.AbstractServer] = None
         self.game_state: Optional[List[int]] = None
         self.shop_texts: Dict[int, Any] = {}   # shop slot -> (flags, "Item for Player")
-        self.shop_hinted = False
+        self.shop_hinted: Set[int] = set()
 
     @staticmethod
     def world_settings(key: str, default: Any) -> Any:
@@ -278,12 +278,10 @@ class RoboRumbleContext(Context):
         await self.scout_shop()
 
     # ------------------------------------------------------------ the engineer's shop
-    def shop_locations(self) -> Dict[int, int]:
-        """location id -> the game's shop slot (boosters 0-8, base upgrades 9-16, inventions 19-21)"""
-        slots = {data.SHOP_OFFSET + i: i for i in range(len(data.BOOSTERS))}
-        slots.update({data.SHOP_OFFSET + 100 + i: 9 + i for i in range(len(data.UPGRADES))})
-        slots.update({data.SHOP_OFFSET + 200 + i: 19 + i for i in range(len(data.INVENTIONS))})
-        return {loc: slot for loc, slot in slots.items() if loc in self.missing_locations or loc in self.checked_locations}
+    def shop_locations(self) -> Dict[int, Any]:
+        """location id -> (side, the game's shop slot) for this slot's shop checks"""
+        return {loc: slot for loc, slot in data.shop_slots().items()
+                if loc in self.missing_locations or loc in self.checked_locations}
 
     async def scout_shop(self) -> None:
         """What the shop's goods are, for its labels (no hint yet)"""
@@ -300,13 +298,15 @@ class RoboRumbleContext(Context):
             name = self.item_names.lookup_in_slot(item.item, item.player)
             text = f"{name} for {self.player_names.get(item.player, '?')}"[:60]
             self.shop_texts[slot] = (item.flags, text)
-            await self.game_send(f"SHOPITEM {slot} {item.flags} {text}")
+            await self.game_send(f"SHOPITEM {slot[0]} {slot[1]} {item.flags} {text}")
 
-    async def shop_opened(self) -> None:
-        """The engineer's menu opened: what is left in the shop gets hinted (once a session)"""
-        locations = sorted(loc for loc in self.shop_locations() if loc in self.missing_locations)
-        if locations and not self.shop_hinted:
-            self.shop_hinted = True
+    async def shop_opened(self, side: int) -> None:
+        """The engineer's menu opened in a campaign of that side: what is left in its shop gets hinted (once a
+        session per side)"""
+        locations = sorted(loc for loc, (s, _) in self.shop_locations().items()
+                           if s == side and loc in self.missing_locations)
+        if locations and side not in self.shop_hinted:
+            self.shop_hinted.add(side)
             await self.send_msgs([{"cmd": "LocationScouts", "locations": locations, "create_as_hint": 2}])
 
     def on_print_json(self, args: dict) -> None:
@@ -360,7 +360,7 @@ class RoboRumbleContext(Context):
         elif cmd == "STATE":
             self.game_state = [int(v) for v in rest.split()]
         elif cmd == "SHOP" and self.slot:
-            await self.shop_opened()
+            await self.shop_opened(int(rest or 0))
 
     async def spy_hint(self) -> None:
         """The spy also tells where one of this slot's own checks leads."""

@@ -295,6 +295,35 @@ static void generate_proffs(const char *name)
     free(src);
 }
 
+/* the names the shop lists show: ours (what buying sends) or the game's own */
+static char **g_booster_names_orig, **g_upgrade_names_orig;
+static char *g_booster_names[9], *g_upgrade_names[8];
+static char g_list_text[17][48];
+
+/* AP label for the list, cut off when long */
+static void list_label(int slot, char *out, int size)
+{
+    char text[64];
+    ap_shop_label(slot, text, sizeof text);
+    if ((int)strlen(text) >= size) {
+        lstrcpynA(out, text, size - 3);
+        strcat(out, "...");
+    } else lstrcpyA(out, text);
+}
+
+/* before each list is built (briefing ticks): ours where the client said what buying sends */
+static void shop_names(void)
+{
+    for (int i = 0; i < 17; i++) {
+        char **orig = i < 9 ? g_booster_names_orig : g_upgrade_names_orig;
+        char **ours = i < 9 ? g_booster_names : g_upgrade_names;
+        int k = i < 9 ? i : i - 9;
+        if (!orig) continue;
+        list_label(i, g_list_text[i], 40);
+        ours[k] = g_list_text[i][0] ? g_list_text[i] : orig[k];
+    }
+}
+
 /* What is being bought (the shop's purchase state): price, then +0x0C upgrade index, +0x10 booster index,
    +0x14 invention index, +0x18 kind (0 booster, 1 invention, 2 upgrade) */
 static BYTE *g_purchase;
@@ -362,7 +391,28 @@ static void shop_install(void)
             }
         }
     }
-    rr_log("ap: shop texts: token function %p, purchase %p", (void *)fn, (void *)g_purchase);
+    /* the booster and base upgrade lists take their names from two pointer tables (mov edi,[ebx*4+names]):
+       pointed at our own tables, the lists are built (and their box sized) with what buying sends */
+    int lists = 0;
+    for (int i = 0, n = 0; i < nt->FileHeader.NumberOfSections && n < 2; i++) {
+        IMAGE_SECTION_HEADER *sc = IMAGE_FIRST_SECTION(nt) + i;
+        if (!(sc->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        BYTE *p = base + sc->VirtualAddress, *end = p + sc->Misc.VirtualSize - 16;
+        for (; p < end && n < 2; p++) {
+            if (p[0] != 0xA1 || p[5] != 0x8B || p[6] != 0x3C || p[7] != 0x9D || p[12] != 0x8D || p[13] != 0x04 ||
+                p[14] != 0x80 || p[15] != 0x8B || p[16] != 0xD0)
+                continue;
+            char ***table = n == 0 ? &g_booster_names_orig : &g_upgrade_names_orig;
+            *table = *(char ***)(p + 8);
+            DWORD ours = n == 0 ? (DWORD)g_booster_names : (DWORD)g_upgrade_names, old;
+            VirtualProtect(p + 8, 4, PAGE_EXECUTE_READWRITE, &old);
+            *(DWORD *)(p + 8) = ours;
+            VirtualProtect(p + 8, 4, old, &old);
+            n++;
+            lists = n;
+        }
+    }
+    rr_log("ap: shop texts: token function %p, purchase %p, lists %d", (void *)fn, (void *)g_purchase, lists);
 }
 
 /* Shop lists on screen: each good shows what buying it sends, greyed once bought (Camouflage too is sold at any
@@ -382,9 +432,6 @@ static void shop_lists(void)
         int state = ap_shop_slot_state(slot);
         if (state < 0) continue;
         g_choice_greyed[i] = state;
-        char text[64];
-        ap_shop_label(slot, text, sizeof text);
-        if (g_choice_text && text[0]) lstrcpynA(g_choice_text + i * 0x8c, text, 0x8c);
     }
 }
 
@@ -683,6 +730,7 @@ void apdlg_tick(void)
     set_var("AP_ARTGOAL", ap_artifacts_missing() >= 0);
     grey_locked(side_mode);
     if (side_mode >= 0) shop_lists();
+    shop_names();
     if (get_var("AP_SHOP", 0)) {
         set_var("AP_SHOP", 0);
         if (side_mode >= 0) ap_shop_opened();

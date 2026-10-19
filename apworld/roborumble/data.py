@@ -13,7 +13,8 @@ table:
     combo build      COMBO_OFFSET + head index * 16 + legs index (location, option combo_builds)
     base upgrades    UPGRADE_OFFSET + index 0-7 (item; order of the engineer's menu)
     inventions       INVENTION_OFFSET + index 0-2 (item)
-    shop purchases   SHOP_OFFSET + booster index 0-8, + 100 + upgrade index, + 200 + invention index (locations)
+    shop purchases   SHOP_OFFSET + 50 * side + booster slot 0-8, + 100 + upgrade slot 0-7, + 200 + invention 0-2
+                     (locations; each side's campaign has its own shop)
     spy hints        SPY_OFFSET + 100 * side + mission number 1-16 (location: the spy's report before that mission)
     report bonuses   BONUS_OFFSET + 100 * side + 20 * kind + mission number 1-15 (kind 0 time, 1 base energy,
                      2 efficiency: the mission report's bonus for matching or beating that record)
@@ -164,16 +165,34 @@ def side_combos(side: int) -> List[str]:
     return [build_combo(h, l) for h in side_heads(side) for l in side_legs(side)]
 
 
-def shop_booster(name: str) -> str:
-    return f"Shop: {name}"
+def shop_booster(side: int, i: int) -> str:
+    return f"{tag(side)} Booster Shop Slot {i + 1}"
 
 
-def shop_upgrade(name: str) -> str:
-    return f"Shop: {name}"
+def shop_upgrade(side: int, i: int) -> str:
+    return f"{tag(side)} Base Upgrade Shop Slot {i + 1}"
 
 
-def shop_invention(name: str) -> str:
-    return f"Shop: {name}"
+def shop_invention(side: int, i: int) -> str:
+    return f"{tag(side)} Secret Invention #{i + 1}"
+
+
+def shop_locations(side: int) -> List[str]:
+    return ([shop_booster(side, i) for i in range(len(BOOSTERS))] + [shop_upgrade(side, i) for i in range(len(UPGRADES))]
+            + [shop_invention(side, i) for i in range(len(INVENTIONS))])
+
+
+def shop_slots() -> Dict[int, Tuple[int, int]]:
+    """shop location id -> (side, the game's shop slot: boosters 0-8, base upgrades 9-16, inventions 19-21)"""
+    slots: Dict[int, Tuple[int, int]] = {}
+    for side in (0, 1):
+        for i in range(len(BOOSTERS)):
+            slots[SHOP_OFFSET + 50 * side + i] = (side, i)
+        for i in range(len(UPGRADES)):
+            slots[SHOP_OFFSET + 100 + 50 * side + i] = (side, 9 + i)
+        for i in range(len(INVENTIONS)):
+            slots[SHOP_OFFSET + 200 + 50 * side + i] = (side, 19 + i)
+    return slots
 
 
 def spy_hint(side: int, number: int) -> str:
@@ -242,12 +261,13 @@ def location_table() -> Dict[str, int]:
         for l, legs in enumerate(LEGS):
             if h // 8 == l // 8:
                 table[build_combo(head, legs)] = COMBO_OFFSET + h * 16 + l
-    for i, name in enumerate(BOOSTERS):
-        table[shop_booster(name)] = SHOP_OFFSET + i
-    for i, name in enumerate(UPGRADES):
-        table[shop_upgrade(name)] = SHOP_OFFSET + 100 + i
-    for i, name in enumerate(INVENTIONS):
-        table[shop_invention(name)] = SHOP_OFFSET + 200 + i
+    for side in (0, 1):
+        for i in range(len(BOOSTERS)):
+            table[shop_booster(side, i)] = SHOP_OFFSET + 50 * side + i
+        for i in range(len(UPGRADES)):
+            table[shop_upgrade(side, i)] = SHOP_OFFSET + 100 + 50 * side + i
+        for i in range(len(INVENTIONS)):
+            table[shop_invention(side, i)] = SHOP_OFFSET + 200 + 50 * side + i
     for side in (0, 1):
         for number in range(1, MISSIONS + 1):
             table[spy_hint(side, number)] = SPY_OFFSET + 100 * side + number

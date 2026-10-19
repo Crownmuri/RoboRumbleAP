@@ -91,8 +91,7 @@ class RoboRumbleWorld(World):
         "Combo Builds": set(data.side_combos(0) + data.side_combos(1)),
         "Report Bonuses": {data.bonus(s, n, k) for s in (0, 1) for n in range(1, data.BONUS_MISSIONS + 1)
                            for k in range(len(data.BONUS_KINDS))},
-        "Shop": {data.shop_booster(n) for n in data.BOOSTERS} | {data.shop_upgrade(n) for n in data.UPGRADES}
-        | {data.shop_invention(n) for n in data.INVENTIONS},
+        "Shop": set(data.shop_locations(0) + data.shop_locations(1)),
         "Spy Reports": {data.spy_hint(s, n) for s in (0, 1) for n in range(1, data.MISSIONS + 1)},
     }
 
@@ -219,9 +218,8 @@ class RoboRumbleWorld(World):
         if self.options.booster_builds:
             names += [data.build_booster(n) for n in data.BOOSTERS]
         if self.options.shop_checks:
-            names += [data.shop_booster(n) for n in data.BOOSTERS]
-            names += [data.shop_upgrade(n) for n in data.UPGRADES]
-            names += [data.shop_invention(n) for n in data.INVENTIONS]
+            for side in self.sides:
+                names += data.shop_locations(side)
         campaign.add_locations({name: self.location_name_to_id[name] for name in names}, RoboRumbleLocation)
         if self.options.bonus_checks:
             # which robots beat the records isn't known yet: no progression there
@@ -318,7 +316,12 @@ class RoboRumbleWorld(World):
         if self.options.booster_builds:
             for name in data.BOOSTERS:
                 self.get_location(data.build_booster(name)).access_rule = lambda state, n=name: state.has(n, player)
-        # The shop's goods are in logic from the start: haggling can get any of them for free.
+        # The shop's goods are in logic as soon as a side's briefings can be reached: haggling can get any of them
+        # for free.
+        if self.options.shop_checks:
+            for side in self.sides:
+                for name in data.shop_locations(side):
+                    self.get_location(name).access_rule = lambda state, s=side: self.side_reachable(state, s)
 
     def fill_slot_data(self) -> Dict[str, Any]:
         slot = {name: getattr(self.options, name).value for name in SLOT_DATA_OPTIONS}

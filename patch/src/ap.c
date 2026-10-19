@@ -55,7 +55,7 @@ static int g_choose_mission, g_choose_side;   /* MISSION side n, mission 0 = non
 static volatile LONG g_dirty;         /* items/checked changed */
 
 /* the shop's goods as the client scouted them: "Rocket Launcher for Alice" (under g_cs) */
-static char g_shop_label[SHOP_SLOTS][64];
+static char g_shop_label[2][SHOP_SLOTS][64];
 
 /* the mission report's bonuses, set when a mission is won (time, efficiency, base energy) */
 static int *g_bonus_time, *g_bonus_efficiency, *g_bonus_energy;
@@ -122,11 +122,13 @@ static int slot_item(int slot)
     return 0;
 }
 
-static int slot_location(int slot)
+/* each side's campaign has its own shop checks */
+static int slot_location(int slot, int side)
 {
-    if (slot < 9) return SHOP_OFFSET + slot;
-    if (slot < 17) return SHOP_OFFSET + 100 + slot - 9;
-    if (slot >= 19) return SHOP_OFFSET + 200 + slot - 19;
+    int s = 50 * side;
+    if (slot < 9) return SHOP_OFFSET + s + slot;
+    if (slot < 17) return SHOP_OFFSET + 100 + s + slot - 9;
+    if (slot >= 19) return SHOP_OFFSET + 200 + s + slot - 19;
     return 0;
 }
 
@@ -182,10 +184,10 @@ static void apply(void)
         if (g_shop_view) {
             /* a good bought since the last look is a check */
             for (int s = 0; s < SHOP_SLOTS; s++)
-                if (slot_location(s) && owned[s] && !g_shop_written[s]) check(slot_location(s));
+                if (slot_location(s, side) && owned[s] && !g_shop_written[s]) check(slot_location(s, side));
         }
         for (int s = 0; s < SHOP_SLOTS; s++) {
-            int loc = slot_location(s);
+            int loc = slot_location(s, side);
             int done = loc ? is_checked(loc) : 1;
             avail[s] = loc ? 1 : 0;
             owned[s] = g_shop_written[s] = (BYTE)done;
@@ -222,19 +224,20 @@ void ap_shop_label(int slot, char *out, int size)
     out[0] = 0;
     if (slot < 0 || slot >= SHOP_SLOTS) return;
     EnterCriticalSection(&g_cs);
-    if (g_have_slot && slot_location(slot)) lstrcpynA(out, g_shop_label[slot], size);
+    int side = campaign_side();
+    if (g_have_slot && slot_location(slot, side)) lstrcpynA(out, g_shop_label[side][slot], size);
     LeaveCriticalSection(&g_cs);
 }
 int ap_shop_slot_state(int slot)   /* -1 no check, 0 open, 1 done */
 {
     if (slot < 0 || slot >= SHOP_SLOTS) return -1;
     EnterCriticalSection(&g_cs);
-    int loc = g_have_slot ? slot_location(slot) : 0;
+    int loc = g_have_slot ? slot_location(slot, campaign_side()) : 0;
     int state = !loc ? -1 : is_checked(loc) ? 1 : 0;
     LeaveCriticalSection(&g_cs);
     return state;
 }
-void ap_shop_opened(void) { send_line("SHOP"); }
+void ap_shop_opened(void) { send_line("SHOP %d", campaign_side()); }
 
 int ap_side_mode(void) { return g_have_slot ? g_side_mode : -1; }
 int ap_campaign_side(void) { return campaign_side(); }
@@ -711,11 +714,12 @@ static void handle(char *line)
             queue_message("Archipelago goal reached! The robot has the epilogue for you.");
         }
     } else if (!strncmp(line, "SHOPITEM ", 9)) {
-        /* SHOPITEM slot flags text: what buying that slot sends */
-        int slot = -1, flags = 0, used = 0;
-        if (sscanf(line + 9, "%d %d %n", &slot, &flags, &used) >= 2 && slot >= 0 && slot < SHOP_SLOTS && used) {
+        /* SHOPITEM side slot flags text: what buying that slot in that side's shop sends */
+        int side = -1, slot = -1, flags = 0, used = 0;
+        if (sscanf(line + 9, "%d %d %d %n", &side, &slot, &flags, &used) >= 3 && side >= 0 && side < 2 &&
+            slot >= 0 && slot < SHOP_SLOTS && used) {
             EnterCriticalSection(&g_cs);
-            lstrcpynA(g_shop_label[slot], line + 9 + used, sizeof g_shop_label[0]);
+            lstrcpynA(g_shop_label[side][slot], line + 9 + used, sizeof g_shop_label[0][0]);
             LeaveCriticalSection(&g_cs);
         }
     } else if (!strncmp(line, "MSG ", 4)) {
