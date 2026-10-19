@@ -122,6 +122,9 @@ const RRGame *rr_game(void)
         ok = locate();
         g.state = g_state; g.heads = g_heads; g.legs = g_legs; g.boosters = g_boosters;
         g.winflag = g_winflag; g.restart = g_restart;
+        /* doDamage walks the robot list: mov ebx,[list] */
+        static const BYTE mov_ebx2[] = { 0x8B, 0x1D };
+        g.units = (BYTE **)operand_after(cmd_handler("doDamage"), mov_ebx2, 2, 48, 0);
     }
     return ok ? &g : NULL;
 }

@@ -248,6 +248,20 @@ void ap_abandon_mission(void)
 }
 int ap_mission_in_progress(void) { return g_mission_running != 0; }
 int ap_goal_done(void) { return g_goal_done != 0; }
+
+/* for traps.c */
+void traps_install(int *local_player);
+void traps_tick(void);
+int ap_item_count(int id)
+{
+    EnterCriticalSection(&g_cs);
+    int n = count_item(id);
+    LeaveCriticalSection(&g_cs);
+    return n;
+}
+const char *ap_seed(void) { return g_have_slot ? g_seed : NULL; }
+static void queue_message(const char *text);
+void ap_message(const char *text) { queue_message(text); }
 /* Watch the epilogue was picked: the client completes the goal now (and the room releases) */
 void ap_epilogue_watched(void) { send_line("EPILOGUE"); }
 /* alien_artifacts_only: how many artifacts are still missing (-1 with another goal) */
@@ -512,6 +526,7 @@ static void tick(void)
     }
     LeaveCriticalSection(&g_cs);
     apdlg_tick();
+    traps_tick();
     show_messages();
 }
 
@@ -760,6 +775,7 @@ void ap_install(void)
     }
     if (built) {
         g_produced_counter = *(DWORD **)(built + 2);
+        traps_install(*(int **)(built - 14));   /* cmp ebp,[local player] before it */
         g_built_resume = built + 6;
         rr_write_jmp(built, (void *)built_stub, 6);
     } else rr_log("ap: robot spawn code not found, no build checks");

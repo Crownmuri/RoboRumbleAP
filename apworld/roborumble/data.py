@@ -84,6 +84,16 @@ FILLER: Dict[int, str] = {
     FILLER_OFFSET + 2: "Shop Money",            # money to spend in the shop between missions
 }
 
+# Traps hit a random robot of the player during a mission (the patch keeps them until the next mission otherwise).
+TRAP_OFFSET = 5200
+TRAPS: Dict[int, str] = {
+    TRAP_OFFSET + 0: "Oil Trap",         # an enemy oil slick under the robot
+    TRAP_OFFSET + 1: "Freeze Trap",      # frozen like a Nitrogrenade hit
+    TRAP_OFFSET + 2: "Disruptor Trap",   # malfunctions like a Disrupter hit
+    TRAP_OFFSET + 3: "Mine Trap",        # destroyed after 30 seconds
+    TRAP_OFFSET + 4: "Nuke Trap",        # an enemy Nuke goes off at the robot
+}
+
 # What each campaign mission lets you build in the original game ('+' = available), per side, taken from the
 # missions' setup code (rr_soft.exe table at 0x52F4F0). Index i of a mask = part i of that side (HeadA/B i).
 VANILLA_HEADS: Dict[int, Tuple[str, ...]] = {
@@ -196,6 +206,8 @@ def item_table() -> Dict[str, int]:
         table[name] = INVENTION_OFFSET + i
     table[ARTIFACT] = ARTIFACT_ID
     for item_id, name in FILLER.items():
+        table[name] = item_id
+    for item_id, name in TRAPS.items():
         table[name] = item_id
     return table
 

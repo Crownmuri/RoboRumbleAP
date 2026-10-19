@@ -68,6 +68,7 @@ typedef struct {
     char *heads, *legs, *boosters;   /* '+'/'-' masks the robot builder reads */
     DWORD *winflag;     /* 1 = mission won, 2 = lost */
     BYTE *restart;
+    BYTE **units;       /* head of the robot list: +8 next */
 } RRGame;
 const RRGame *rr_game(void);    /* NULL if the game data wasn't found */
 

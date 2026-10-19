@@ -10,7 +10,7 @@ from .options import RoboRumbleOptions
 
 SLOT_DATA_OPTIONS = (
     "side", "starting_side", "starting_parts", "starting_weapons", "goal", "open_missions", "final_mission_wins", "logic_strictness", "booster_builds",
-    "combo_builds", "shop_checks", "spy_checks", "alien_artifacts", "extra_artifacts", "death_link",
+    "combo_builds", "shop_checks", "spy_checks", "alien_artifacts", "extra_artifacts", "trap_percentage", "death_link",
 )
 
 VICTORY = "Victory"
@@ -79,6 +79,7 @@ class RoboRumbleWorld(World):
         "Boosters": set(data.BOOSTERS),
         "Base Upgrades": set(data.UPGRADES),
         "Inventions": set(data.INVENTIONS),
+        "Traps": set(data.TRAPS.values()),
         "Red Star Mission Access": {data.mission_access(0, n) for n in range(1, data.FINAL_MISSION + 1)},
         "Terraflux Mission Access": {data.mission_access(1, n) for n in range(1, data.FINAL_MISSION + 1)},
     }
@@ -129,6 +130,8 @@ class RoboRumbleWorld(World):
     def create_item(self, name: str) -> RoboRumbleItem:
         if name in data.FILLER.values():
             classification = ItemClassification.filler
+        elif name in data.TRAPS.values():
+            classification = ItemClassification.trap
         elif name in data.UPGRADES or name in data.INVENTIONS:
             classification = ItemClassification.useful
         elif name == data.ARTIFACT:
@@ -167,7 +170,14 @@ class RoboRumbleWorld(World):
             pool += [self.create_item(data.ARTIFACT) for _ in range(artifacts)]
 
         missing = len(self.multiworld.get_unfilled_locations(self.player)) - len(pool)
-        pool += [self.create_item(self.get_filler_item_name()) for _ in range(missing)]
+        weights = [self.options.oil_trap_weight.value, self.options.freeze_trap_weight.value,
+                   self.options.disruptor_trap_weight.value, self.options.mine_trap_weight.value,
+                   self.options.nuke_trap_weight.value]
+        traps = round(max(missing, 0) * self.options.trap_percentage.value / 100) if sum(weights) else 0
+        if traps:
+            names = self.random.choices(list(data.TRAPS.values()), weights=weights, k=traps)
+            pool += [self.create_item(name) for name in names]
+        pool += [self.create_item(self.get_filler_item_name()) for _ in range(missing - traps)]
         self.multiworld.itempool += pool
 
     # ---------------------------------------------------------------- locations

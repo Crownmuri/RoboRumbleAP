@@ -152,6 +152,55 @@ class ExtraArtifacts(Range):
     default = 2
 
 
+class TrapPercentage(Range):
+    """How many of the filler items are traps, in percent. A trap hits a random robot of yours in the current
+    mission (or the next one)."""
+    display_name = "Trap Percentage"
+    range_start = 0
+    range_end = 100
+    default = 0
+
+
+class OilTrapWeight(Range):
+    """How likely a trap is an Oil Trap: an enemy oil slick under one of your robots."""
+    display_name = "Oil Trap Weight"
+    range_start = 0
+    range_end = 10
+    default = 3
+
+
+class FreezeTrapWeight(Range):
+    """How likely a trap is a Freeze Trap: one of your robots is frozen like by a Nitrogrenade."""
+    display_name = "Freeze Trap Weight"
+    range_start = 0
+    range_end = 10
+    default = 3
+
+
+class DisruptorTrapWeight(Range):
+    """How likely a trap is a Disruptor Trap: one of your robots malfunctions like after a Disrupter hit."""
+    display_name = "Disruptor Trap Weight"
+    range_start = 0
+    range_end = 10
+    default = 3
+
+
+class MineTrapWeight(Range):
+    """How likely a trap is a Mine Trap: one of your robots is destroyed after 30 seconds."""
+    display_name = "Mine Trap Weight"
+    range_start = 0
+    range_end = 10
+    default = 2
+
+
+class NukeTrapWeight(Range):
+    """How likely a trap is a Nuke Trap: an enemy Nuke goes off at one of your robots."""
+    display_name = "Nuke Trap Weight"
+    range_start = 0
+    range_end = 10
+    default = 1
+
+
 @dataclass
 class RoboRumbleOptions(PerGameCommonOptions):
     side: Side
@@ -168,4 +217,10 @@ class RoboRumbleOptions(PerGameCommonOptions):
     spy_checks: SpyChecks
     alien_artifacts: AlienArtifacts
     extra_artifacts: ExtraArtifacts
+    trap_percentage: TrapPercentage
+    oil_trap_weight: OilTrapWeight
+    freeze_trap_weight: FreezeTrapWeight
+    disruptor_trap_weight: DisruptorTrapWeight
+    mine_trap_weight: MineTrapWeight
+    nuke_trap_weight: NukeTrapWeight
     death_link: DeathLink
