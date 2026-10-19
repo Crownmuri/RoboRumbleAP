@@ -37,22 +37,37 @@ static int g_ready;
 #define R_OWNER       0x414
 #define R_X           0x44C
 #define R_Y           0x450
+#define R_DEAD        0x36E   /* byte: set when destroyed (the robot stays in the list a while) */
 
 /* mines stuck to robots: robot and game time it blows */
 static struct { BYTE *robot; DWORD at; } g_mines[16];
 
 static int robot_alive(BYTE *r)
 {
-    for (BYTE *u = *g_units; u; u = *(BYTE **)(u + R_NEXT)) if (u == r) return 1;
+    for (BYTE *u = *g_units; u; u = *(BYTE **)(u + R_NEXT)) if (u == r) return !u[R_DEAD];
     return 0;
+}
+
+/* robots seen in the list, with the time first seen: a robot just out of the factory isn't a target yet
+   (frozen in the factory's exit it was destroyed at once) */
+static struct { BYTE *robot; DWORD since; } g_seen[256];
+static int g_nseen;
+
+static DWORD seen_since(BYTE *r, DWORD now)
+{
+    for (int i = 0; i < g_nseen; i++) if (g_seen[i].robot == r) return g_seen[i].since;
+    if (g_nseen < 256) { g_seen[g_nseen].robot = r; g_seen[g_nseen].since = now; g_nseen++; }
+    return now;
 }
 
 static BYTE *random_own_robot(void)
 {
     BYTE *list[256];
     int n = 0;
+    DWORD now = GetTickCount();
     for (BYTE *u = *g_units; u && n < 256; u = *(BYTE **)(u + R_NEXT))
-        if (*(int *)(u + R_OWNER) == *g_local_player) list[n++] = u;
+        if (*(int *)(u + R_OWNER) == *g_local_player && !u[R_DEAD] && now - seen_since(u, now) >= 3000)
+            list[n++] = u;
     return n ? list[rand() % n] : NULL;
 }
 
@@ -125,9 +140,21 @@ void traps_tick(void)
     if (!g_ready) return;
     if (g_gui_mode != RR_MODE_GAMEPLAY) {   /* a mission ended: its robots are gone */
         memset(g_mines, 0, sizeof g_mines);
+        g_nseen = 0;
         return;
     }
     DWORD now = GetTickCount();
+    {   /* the robots now in the list keep their first-seen time, the others are dropped */
+        static struct { BYTE *robot; DWORD since; } keep[256];
+        int n = 0;
+        for (BYTE *u = *g_units; u && n < 256; u = *(BYTE **)(u + R_NEXT)) {
+            keep[n].robot = u;
+            keep[n].since = seen_since(u, now);
+            n++;
+        }
+        memcpy(g_seen, keep, n * sizeof keep[0]);
+        g_nseen = n;
+    }
     for (int i = 0; i < 16; i++) {
         if (!g_mines[i].robot || (int)(now - g_mines[i].at) < 0) continue;
         if (robot_alive(g_mines[i].robot)) {
@@ -135,6 +162,17 @@ void traps_tick(void)
             destroy(g_mines[i].robot);
         }
         g_mines[i].robot = NULL;
+    }
+    /* [ap] trap_keys=1 in rrpatch.ini (testing): F5-F9 set off one trap each */
+    static int keys = -1;
+    if (keys < 0) keys = GetPrivateProfileIntA("ap", "trap_keys", 0, g_ini_path);
+    if (keys && GetForegroundWindow() == rr_game_hwnd()) {
+        static int down[TRAPS];
+        for (int t = 0; t < TRAPS; t++) {
+            int d = (GetAsyncKeyState(VK_F5 + t) & 0x8000) != 0;
+            if (d && !down[t]) { rr_log("trap: key F%d", 5 + t); fire(t); }
+            down[t] = d;
+        }
     }
     static DWORD last;
     if (now - last < 1000) return;   /* at most one trap a second */
