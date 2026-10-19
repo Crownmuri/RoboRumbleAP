@@ -110,6 +110,7 @@ class RoboRumbleContext(Context):
         self.slot_data: Dict[str, Any] = {}
         self.port = int(self.world_settings("bridge_port", DEFAULT_PORT))
         self.game_writer: Optional[asyncio.StreamWriter] = None
+        self.items_announced = 0   # received items already shown in the game
         self.game_server: Optional[asyncio.AbstractServer] = None
         self.game_state: Optional[List[int]] = None
 
@@ -202,6 +203,7 @@ class RoboRumbleContext(Context):
                                                 "status": CommonClient.ClientStatus.CLIENT_PLAYING}]))
             Utils.async_start(self.sync_game())
         elif cmd == "ReceivedItems":
+            Utils.async_start(self.announce_items())
             Utils.async_start(self.send_items())
             Utils.async_start(self.check_goal())
         elif cmd == "RoomUpdate" and "checked_locations" in args:
@@ -255,6 +257,28 @@ class RoboRumbleContext(Context):
         await self.send_checked()
         await self.send_items()
 
+    def on_print_json(self, args: dict) -> None:
+        super().on_print_json(args)
+        # this slot's items that went to someone else are announced in the game too
+        item = args.get("item")
+        receiving = args.get("receiving")
+        if args.get("type") == "ItemSend" and item is not None and item.player == self.slot and receiving != self.slot:
+            name = self.item_names.lookup_in_slot(item.item, receiving)
+            Utils.async_start(self.game_send(f"MSG Sent {name} to {self.player_names.get(receiving, '?')}"))
+
+    async def announce_items(self) -> None:
+        """New items in the game's message line. A fresh connection only marks what is already there."""
+        if self.game_writer is None:
+            return
+        new = self.items_received[self.items_announced:]
+        self.items_announced = len(self.items_received)
+        for item in new[-8:]:
+            name = self.item_names.lookup_in_game(item.item)
+            if item.player == self.slot:
+                await self.game_send(f"MSG Found {name}")
+            else:
+                await self.game_send(f"MSG Received {name} from {self.player_names.get(item.player, '?')}")
+
     async def send_items(self) -> None:
         if self.slot:
             await self.game_send("ITEMS " + ",".join(str(item.item) for item in self.items_received))
@@ -267,6 +291,7 @@ class RoboRumbleContext(Context):
         cmd, _, rest = line.partition(" ")
         if cmd == "HELLO":
             CommonClient.logger.info(f"Game connected ({rest}).")
+            self.items_announced = len(self.items_received)
             await self.sync_game()
         elif cmd == "CHECK" and self.slot:
             location = int(rest)

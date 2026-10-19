@@ -229,6 +229,8 @@ static void (__cdecl *g_level_banner)(int level);   /* draws "LEVEL n" on the lo
 static DWORD *g_in_mission;   /* the briefing shows the in-mission menu while this is set */
 static int *g_preset_side;    /* new campaign: side + 1 skips the faction screen (0 = the player picks) */
 static int g_preset_orig;
+static BYTE *g_boot_flag;
+static int *g_saved_side;   /* side of the last session (rrumble.ini): while set, the intro is skipped */   /* set while booting: no intro, the first briefing opens on the robot's menu */
 static DWORD g_prev_mode;
 
 /* a mission left through the menu: no win, and the next briefing is a normal one */
@@ -238,6 +240,18 @@ void ap_abandon_mission(void)
     if (g_in_mission) *g_in_mission = 0;
 }
 int ap_mission_in_progress(void) { return g_mission_running != 0; }
+
+/* the campaign goes to this mission at the next level load; the loading screen's door shows its number */
+void ap_set_mission(int side, int n)
+{
+    EnterCriticalSection(&g_cs);
+    *(int *)G->state = side;
+    *(int *)(G->state + 4) = n - 1;
+    g_choose_side = side;
+    g_choose_mission = n;
+    LeaveCriticalSection(&g_cs);
+    if (g_level_banner) g_level_banner(n - 1);
+}
 
 static int side_has_open_mission(int side)
 {
@@ -259,8 +273,36 @@ static int pick_mission(void)
     return 1;
 }
 
+static char *state_path(char *buf, size_t n);
+
+/* A seed played for the first time: no check yet and not started in this game folder before */
+static int fresh_seed(void)
+{
+    char p[MAX_PATH];
+    return g_have_slot && g_nchecked == 0 &&
+           !GetPrivateProfileIntA(g_seed, "started", 0, state_path(p, sizeof p));
+}
+
 static void on_mode(DWORD mode)
 {
+    /* Booting goes straight to a blank campaign (mode 9 without intro). For a fresh seed the game starts the way a
+       new campaign does instead: the intro, then the first briefing of the slot's side. */
+    static int booted;
+    if (mode == 9 && !booted) {
+        booted = 1;
+        EnterCriticalSection(&g_cs);
+        int fresh = fresh_seed();
+        LeaveCriticalSection(&g_cs);
+        if (fresh) {
+            char p[MAX_PATH];
+            WritePrivateProfileStringA(g_seed, "started", "1", state_path(p, sizeof p));
+            rr_log("ap: fresh seed, the campaign starts with the intro");
+            if (g_boot_flag) *g_boot_flag = 0;   /* a new campaign as from the menu, not the boot one */
+            if (g_saved_side) *g_saved_side = 0; /* the intro only plays when no side is remembered */
+            rr_replace_mode(2);   /* INTRO, which goes on to the new campaign */
+            return;
+        }
+    }
     /* Start a new campaign (faction screen next): with a slot the campaign is that of the slot's side, so the
        faction screen is skipped and the first briefing of that side follows */
     if (mode == 9 && g_preset_side) {
@@ -283,7 +325,9 @@ static void on_mode(DWORD mode)
     if (mode == RR_MODE_LOADLEVEL || mode == RR_MODE_MENU || mode == 11 /* RELOADLEVEL */ || mode == 13 /* LOADGAME */)
         g_mission_running = 0;
 
-    if (!g_mission_running && (mode == RR_MODE_BRIEFING || mode == RR_MODE_LOADLEVEL)) {
+    /* only while a level loads: the level's map, funds and parts are set up there, so changing it later would mix
+       two missions */
+    if (!g_mission_running && mode == RR_MODE_LOADLEVEL) {
         int side = campaign_side();
         /* a campaign of a side this slot doesn't play, or one with nothing unlocked: the side that has */
         if (!side_played(side) || !side_has_open_mission(side)) {
@@ -297,7 +341,7 @@ static void on_mode(DWORD mode)
         if (*level != n - 1) {
             rr_log("ap: mission %d -> %d", *level + 1, n);
             *level = n - 1;
-            if (mode == RR_MODE_LOADLEVEL && g_level_banner) g_level_banner(*level);
+            if (g_level_banner) g_level_banner(*level);
         }
         if (mode == RR_MODE_LOADLEVEL) g_choose_mission = 0;
     }
@@ -388,6 +432,36 @@ __asm__(
     "    jmp *_g_built_resume\n");
 void built_stub(void);
 
+/* ---------------------------------------------------------------- messages on screen */
+/* MSG lines from the client go to the game's message line (where "robo ready" shows), during missions */
+static void (__cdecl *g_show_message)(const char *text);
+static char g_msgs[16][100];
+static int g_nmsgs;
+
+static void queue_message(const char *text)
+{
+    EnterCriticalSection(&g_cs);
+    if (g_nmsgs == 16) { memmove(g_msgs[0], g_msgs[1], sizeof g_msgs[0] * 15); g_nmsgs = 15; }
+    lstrcpynA(g_msgs[g_nmsgs++], text, sizeof g_msgs[0]);
+    LeaveCriticalSection(&g_cs);
+}
+
+static void show_messages(void)
+{
+    static DWORD last;
+    if (!g_show_message || g_gui_mode != RR_MODE_GAMEPLAY || !g_nmsgs) return;
+    DWORD now = GetTickCount();
+    if (now - last < 1500) return;
+    last = now;
+    char text[100];
+    EnterCriticalSection(&g_cs);
+    lstrcpynA(text, g_msgs[0], sizeof text);
+    memmove(g_msgs[0], g_msgs[1], sizeof g_msgs[0] * 15);
+    g_nmsgs--;
+    LeaveCriticalSection(&g_cs);
+    g_show_message(text);
+}
+
 /* ---------------------------------------------------------------- game thread */
 static void tick(void)
 {
@@ -412,12 +486,94 @@ static void tick(void)
     }
     LeaveCriticalSection(&g_cs);
     apdlg_tick();
+    show_messages();
 }
 
 static BOOL (WINAPI *prev_PeekMessageA)(LPMSG, HWND, UINT, UINT, UINT);
 static BOOL (WINAPI *prev_GetMessageA)(LPMSG, HWND, UINT, UINT);
 static BOOL WINAPI ap_PeekMessageA(LPMSG m, HWND h, UINT a, UINT b, UINT r) { tick(); return prev_PeekMessageA(m, h, a, b, r); }
 static BOOL WINAPI ap_GetMessageA(LPMSG m, HWND h, UINT a, UINT b) { tick(); return prev_GetMessageA(m, h, a, b); }
+
+
+/* ---------------------------------------------------------------- the report after a mission */
+/* The briefing starts a mission's report when it comes from a mission, except for the first mission, which it
+   takes for a new campaign (the representative's welcome, no report). With missions in any order the first one
+   can follow a mission too. Replaces "mov eax,[level]; test eax,eax; je first_mission". */
+int *g_rep_level;
+DWORD *g_rep_from_mission;
+void *g_rep_resume, *g_rep_first;
+__asm__(
+    ".text\n"
+    ".globl _report_stub\n"
+    "_report_stub:\n"
+    "    movl _g_rep_level, %eax\n"
+    "    movl (%eax), %eax\n"
+    "    testl %eax, %eax\n"
+    "    jne 1f\n"
+    "    movl _g_rep_from_mission, %edx\n"
+    "    cmpl $0, (%edx)\n"
+    "    jne 1f\n"
+    "    jmp *_g_rep_first\n"
+    "1:  jmp *_g_rep_resume\n");
+void report_stub(void);
+
+static BYTE *scan_code(int (*match)(const BYTE *p), int tail)
+{
+    BYTE *base = (BYTE *)GetModuleHandleA(NULL);
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(nt);
+    for (int i = 0; i < nt->FileHeader.NumberOfSections; i++, sec++) {
+        if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - tail;
+        for (; p < end; p++) if (match(p)) return p;
+    }
+    return NULL;
+}
+
+/* mov eax,[level]; test eax,eax; je +x; mov edx,[from mission]; test edx,edx; je +5; cmp eax,10h; jne */
+static int match_report(const BYTE *p)
+{
+    return p[0] == 0xA1 && *(BYTE **)(p + 1) == G->state + 4 && p[5] == 0x85 && p[6] == 0xC0 && p[7] == 0x74 &&
+           p[9] == 0x8B && p[10] == 0x15 && p[15] == 0x85 && p[16] == 0xD2 && p[17] == 0x74 && p[18] == 0x05 &&
+           p[19] == 0x83 && p[20] == 0xF8 && p[21] == 0x10 && p[22] == 0x75;
+}
+
+static void install_report(void)
+{
+    BYTE *p = scan_code(match_report, 32);
+    if (!p) { rr_log("ap: briefing report code not found"); return; }
+    g_rep_level = (int *)(G->state + 4);
+    g_rep_from_mission = *(DWORD **)(p + 11);
+    g_rep_first = p + 9 + (signed char)p[8];
+    g_rep_resume = p + 9;
+    if (rr_write_jmp(p, (void *)report_stub, 9)) rr_log("ap: report after any mission (%p)", p);
+}
+
+/* the message line: the code that announces "Console enabled" loads the text into ecx, then calls it */
+static void find_message_fn(void)
+{
+    BYTE *base = (BYTE *)GetModuleHandleA(NULL);
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(nt);
+    BYTE *text = NULL;
+    for (int i = 0; i < nt->FileHeader.NumberOfSections && !text; i++, sec++) {
+        if (sec->Characteristics & IMAGE_SCN_MEM_EXECUTE) continue;
+        BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 16;
+        for (; p < end; p++) if (!memcmp(p, "Console enabled", 15)) { text = p; break; }
+    }
+    if (!text) return;
+    sec = IMAGE_FIRST_SECTION(nt);
+    for (int i = 0; i < nt->FileHeader.NumberOfSections && !g_show_message; i++, sec++) {
+        if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 40;
+        for (; p < end; p++) {
+            if (p[0] != 0xB9 || *(BYTE **)(p + 1) != text) continue;
+            for (BYTE *q = p + 5; q < p + 30; q++)
+                if (q[0] == 0xE8) { g_show_message = (void *)(q + 5 + *(int *)(q + 1)); break; }
+            break;
+        }
+    }
+}
 
 /* ---------------------------------------------------------------- the connection */
 static int *parse_ids(const char *s, int *n)
@@ -469,6 +625,7 @@ static void handle(char *line)
         rr_log("ap: next mission %d of side %d", n, side);
     } else if (!strncmp(line, "MSG ", 4)) {
         rr_log("ap: %s", line + 4);
+        queue_message(line + 4);
     }
 }
 
@@ -614,11 +771,21 @@ void ap_install(void)
                     p[24] == 0x84 && p[25] == 0x24) {
                     g_preset_side = *(int **)(p + 1);
                     g_preset_orig = *g_preset_side;
+                    /* just before it: mov dl,[booting]; test dl,dl; mov [..],eax; jne */
+                    if (p[-19] == 0x8A && p[-18] == 0x15 && p[-13] == 0x84 && p[-12] == 0xD2) {
+                        g_boot_flag = *(BYTE **)(p - 17);
+                        BYTE *boot = p + *(int *)(p - 4);   /* the jne's target: mov edx,[saved side] */
+                        if (boot[0] == 0x8B && boot[1] == 0x15) g_saved_side = *(int **)(boot + 2);
+                    }
                     break;
                 }
         }
         if (!g_preset_side) rr_log("ap: faction preset not found, the faction screen stays");
     }
+
+    install_report();
+    find_message_fn();
+    if (!g_show_message) rr_log("ap: message line not found, no messages in the game");
 
     HMODULE exe = GetModuleHandleA(NULL);
     prev_PeekMessageA = rr_hook_iat(exe, "USER32.dll", "PeekMessageA", (void *)ap_PeekMessageA);

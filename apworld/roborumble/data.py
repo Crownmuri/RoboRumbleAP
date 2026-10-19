@@ -50,6 +50,14 @@ LEGS: Tuple[str, ...] = (
     "2-Legs A", "Heavy 4-Legs", "Kangaroo", "Caterpillar", "4-Tires", "Amphibian", "Propeller", "Snail",
     "2-Legs B", "Teleporter", "Jet-Pack", "Spider Legs", "Jet-Car", "Hovercraft", "Antigraviton", "Cube",
 )
+# Weapons that do no damage on their own: a robot army needs another weapon besides them
+SUPPORT_HEADS = ("Oiler", "Nitrogrenade")
+
+
+def side_attack_heads(side: int) -> List[str]:
+    return [h for h in side_heads(side) if h not in SUPPORT_HEADS]
+
+
 # Order of the Boosters mask and of the shop's booster slots (nls\lang.ini 732-740). In the original game
 # Maximum Weapon needs Fire Power + Fire Range + Fire Frequency, Maximum Defense needs Speed + Turn Speed + Shield,
 # and Camouflage excludes both Maximum boosters (pick two of three).

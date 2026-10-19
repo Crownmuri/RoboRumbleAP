@@ -31,12 +31,21 @@ class StartingParts(Choice):
     """
     What you can build at the start.
     vanilla: the weapons and legs the first mission gives in the original game.
-    minimal: one random weapon and the side's basic legs.
+    random_weapons: random weapons (as many as starting_weapons, never only Oiler or Nitrogrenade) and the side's basic legs.
     """
     display_name = "Starting Parts"
     option_vanilla = 0
-    option_minimal = 1
-    default = 0
+    option_random_weapons = 1
+    alias_minimal = 1
+    default = 1
+
+
+class StartingWeapons(Range):
+    """With starting_parts: random_weapons, how many weapons of each side you start with (all of them do damage)."""
+    display_name = "Starting Weapons"
+    range_start = 1
+    range_end = 4
+    default = 2
 
 
 class OpenMissions(Range):
@@ -129,6 +138,7 @@ class RoboRumbleOptions(PerGameCommonOptions):
     side: Side
     starting_side: StartingSide
     starting_parts: StartingParts
+    starting_weapons: StartingWeapons
     open_missions: OpenMissions
     final_mission_wins: FinalMissionWins
     logic_strictness: LogicStrictness

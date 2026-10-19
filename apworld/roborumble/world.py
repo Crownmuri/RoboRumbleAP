@@ -9,7 +9,7 @@ from . import data
 from .options import RoboRumbleOptions
 
 SLOT_DATA_OPTIONS = (
-    "side", "starting_side", "starting_parts", "open_missions", "final_mission_wins", "logic_strictness", "booster_builds",
+    "side", "starting_side", "starting_parts", "starting_weapons", "open_missions", "final_mission_wins", "logic_strictness", "booster_builds",
     "combo_builds", "shop_checks", "spy_checks", "alien_artifacts", "extra_artifacts", "death_link",
 )
 
@@ -114,8 +114,8 @@ class RoboRumbleWorld(World):
             return
         self.start_heads, self.start_legs = [], []
         for side in self.sides:
-            if self.options.starting_parts == "minimal":
-                self.start_heads.append(self.random.choice(data.side_heads(side)))
+            if self.options.starting_parts == "random_weapons":
+                self.start_heads += self.random.sample(data.side_attack_heads(side), self.options.starting_weapons.value)
                 self.start_legs.append(data.side_legs(side)[0])
             else:
                 heads, legs = data.starting_parts(side)
@@ -204,7 +204,9 @@ class RoboRumbleWorld(World):
             heads, legs = max(1, heads // 2), max(1, legs // 2)
         else:
             heads, legs = max(1, heads - 1), max(1, legs - 1)
-        return (state.has_from_list(data.side_heads(side), self.player, heads)
+        # weapons that do no damage on their own (Oiler, Nitrogrenade) don't count
+        heads = min(heads, len(data.side_attack_heads(side)))
+        return (state.has_from_list(data.side_attack_heads(side), self.player, heads)
                 and state.has_from_list(data.side_legs(side), self.player, legs))
 
     def mission_open(self, state: CollectionState, side: int, mission: int) -> bool:

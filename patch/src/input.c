@@ -58,12 +58,13 @@ __asm__(
     ".text\n"
     ".globl _mode_stub\n"
     "_mode_stub:\n"
-    "    movl %ebx, _g_gui_mode\n"
     "    pushal\n"
     "    pushl %ebx\n"
-    "    call _rr_mode_changed\n"
+    "    call _rr_mode_changed\n"      /* returns the mode to go to (a listener may replace it) */
     "    addl $4, %esp\n"
+    "    movl %eax, 16(%esp)\n"        /* the saved ebx */
     "    popal\n"
+    "    movl %ebx, _g_gui_mode\n"
     "    movl _g_mode_fmt, %eax\n"
     "    jmp *_g_mode_resume\n"
 
@@ -122,9 +123,22 @@ void rr_on_mode(void (*fn)(DWORD mode))
     for (int i = 0; i < 4; i++) if (!g_mode_listeners[i]) { g_mode_listeners[i] = fn; return; }
 }
 
-void __cdecl rr_mode_changed(DWORD mode)
+static DWORD g_mode_replace;
+void rr_replace_mode(DWORD mode) { g_mode_replace = mode; }   /* from a listener: go to this screen instead */
+
+DWORD __cdecl rr_mode_changed(DWORD mode)
 {
+    g_mode_replace = 0;
+    g_gui_mode = mode;
     for (int i = 0; i < 4; i++) if (g_mode_listeners[i]) g_mode_listeners[i](mode);
+    if (g_mode_replace) {
+        rr_log("input: game mode %lu replaced by %lu", mode, g_mode_replace);
+        mode = g_mode_replace;
+        g_mode_replace = 0;
+        g_gui_mode = mode;
+        for (int i = 0; i < 4; i++) if (g_mode_listeners[i]) g_mode_listeners[i](mode);
+    }
+    return mode;
 }
 void down_stub(void);
 void enemy_stub(void);

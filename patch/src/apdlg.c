@@ -22,6 +22,10 @@ void ap_choose_mission(int side, int n);
 int ap_campaign_side(void);
 int ap_mission_in_progress(void);
 void ap_abandon_mission(void);
+void ap_set_mission(int side, int n);
+static void (__cdecl *g_door_close)(void);   /* the briefing's doors close (with their sound) */
+static DWORD *g_next_mode;                   /* the briefing leaves for this mode once the doors are shut */
+static BYTE *g_door_flag;
 
 typedef struct { char name[40]; int value; } DlgVar;
 static DlgVar *g_vars;
@@ -33,6 +37,38 @@ static char *g_choice_labels;
 /* ---------------------------------------------------------------- the script */
 static const char *k_script =
     "\n"
+    ":ap_do_menu\n"
+    "YOU\n"
+    "  >>ap_missions\n"
+    "    Choose a mission\n"
+    "  >>save\n"
+    "    Save the game\n"
+    "  >>load\n"
+    "    Load a game\n"
+    "  >>options\n"
+    "    Set some options\n"
+    "  >>areyousure_quit\n"
+    "    Quit the game\n"
+    "SETVARIABLE ROBOT_WELCOME 1\n"
+    "\n"
+    ":ap_do_menu_in_game\n"
+    "YOU\n"
+    "  >>ap_missions\n"
+    "    Choose a mission\n"
+    "  >>ap_abandon\n"
+    "    Abandon mission\n"
+    "  >>return_to_game\n"
+    "    Return to mission\n"
+    "  >>restart_game\n"
+    "    Restart mission\n"
+    "  >>load\n"
+    "    Load a game\n"
+    "  >>options\n"
+    "    Set some options\n"
+    "  >>areyousure_quit\n"
+    "    Quit the game\n"
+    "SETVARIABLE ROBOT_WELCOME 1\n"
+    "\n"
     ":ap_back\n"
     "SWITCH\n"
     "IF AP_INGAME = 1 THEN do_menu_in_game\n"
@@ -41,7 +77,7 @@ static const char *k_script =
     ":ap_abandon\n"
     "SWITCH\n"
     "SETVARIABLE AP_PICK 999\n"
-    "GOTO ap_abandoned\n"
+    "GOTO end\n"
     "\n"
     ":ap_abandoned\n"
     "TALKER\n"
@@ -130,7 +166,7 @@ static char *mission_lists(char *buf, size_t *len, size_t *cap)
         for (int n = 1; n <= 16; n++) {
             snprintf(line, sizeof line,
                      "\n:ap_pick_%c_%d\nSWITCH\nIF AP_OPEN_%c_%d = 1 THEN ap_go_%c_%d\nGOTO ap_locked\n"
-                     "\n:ap_go_%c_%d\nSWITCH\nSETVARIABLE AP_PICK %d\nGOTO ap_picked\n",
+                     "\n:ap_go_%c_%d\nSWITCH\nSETVARIABLE AP_PICK %d\nGOTO end\n",
                      s, n, s - 32, n, s, n, s, n, side * 100 + n);
             buf = append(buf, len, cap, line);
         }
@@ -177,13 +213,23 @@ void apdlg_generate(void)
         snprintf(marker, sizeof marker, ":%s%sYOU%s", k_menus[m].label, nl, nl);
         const char *at = strstr(rest, marker);
         if (!at) { rr_log("ap: %s not found in common.dlg", k_menus[m].label); continue; }
-        size_t head = (at - rest) + strlen(marker);
+        size_t head = at - rest;
         char *part = malloc(head + 1);
         memcpy(part, rest, head);
         part[head] = 0;
         out = append(out, &len, &cap, part);
         free(part);
-        char *c = with_line_ends(k_menus[m].choices, crlf, &clen);
+        /* while connected the robot shows the Archipelago version of the menu (ap_do_menu...), which has no new
+           campaign and no multiplayer: the campaign belongs to the slot */
+        char sw[256];
+        snprintf(sw, sizeof sw, ":%s\nSWITCH\nIF AP_ON = 1 THEN ap_%s\nGOTO %s_full\n\n:%s_full\nYOU\n",
+                 k_menus[m].label, k_menus[m].label, k_menus[m].label, k_menus[m].label);
+        char *c = with_line_ends(sw, crlf, &clen);
+        out = append(out, &len, &cap, c);
+        free(c);
+        rest = at;
+        head = strlen(marker);
+        c = with_line_ends(k_menus[m].choices, crlf, &clen);
         out = append(out, &len, &cap, c);
         free(c);
         rest += head;
@@ -286,11 +332,23 @@ static int locate(void)
             }
     }
     if (r) {
-        g_reenter_flag = *(BYTE **)(r + 1);
-        g_reenter_resume = r + 5;
-        g_reenter_exit = r + 30 + 0x11;
-        rr_write_jmp(r, (void *)reenter_stub, 5);
-    } else rr_log("ap: briefing loop end not found, a mission pick shows from the next briefing on");
+        g_door_flag = *(BYTE **)(r + 1);
+        g_next_mode = *(DWORD **)(r + 22);
+    }
+    /* mov al,[doors]; test al,al; jne +0f; call door_close; mov dword [next mode],0Dh  (Load a game) */
+    sec = IMAGE_FIRST_SECTION(nt);
+    for (int i = 0; i < nt->FileHeader.NumberOfSections && !g_door_close && g_door_flag; i++, sec++) {
+        if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 24;
+        for (; p < end; p++)
+            if (p[0] == 0xA0 && *(BYTE **)(p + 1) == g_door_flag && p[5] == 0x84 && p[6] == 0xC0 && p[7] == 0x75 &&
+                p[8] == 0x0F && p[9] == 0xE8 && p[14] == 0xC7 && p[15] == 0x05 && *(DWORD **)(p + 16) == g_next_mode &&
+                p[20] == 0x0D) {
+                g_door_close = (void *)(p + 14 + *(int *)(p + 10));
+                break;
+            }
+    }
+    if (!g_door_close) rr_log("ap: briefing doors not found, picking a mission won't work");
 
     /* the choice list on screen, from the code that lists the engineer's boosters:
        mov eax,[count]; mov edx,"buy_booster_%d"; ...; lea eax,[eax*8 + labels]; ...; mov [eax*4 + greyed],edx */
@@ -331,8 +389,8 @@ static int locate(void)
                 break;
             }
     }
-    rr_log("ap: dialog variables at %p (count %p), briefing restart %p, choices %p/%p/%p, redraw %p",
-           g_vars, g_nvars, r, g_choice_count, g_choice_labels, g_choice_greyed, g_redraw);
+    rr_log("ap: dialog variables at %p (count %p), doors %p, choices %p/%p/%p, redraw %p",
+           g_vars, g_nvars, (void *)g_door_close, g_choice_count, g_choice_labels, g_choice_greyed, g_redraw);
     done = 1;
     return 1;
 }
@@ -392,26 +450,16 @@ void apdlg_tick(void)
             pn = *(int *)(rr_game()->state + 4) + 1;
         }
         rr_log("ap: mission %d of side %d picked in the briefing", pn, ps);
-        ap_choose_mission(ps, pn);
         if (mode == RR_MODE_BRIEFING) {
-            g_reenter_mode = RR_MODE_BRIEFING;
-            if (ingame) {
-                /* from the menu during a mission: that mission is given up, the picked one loaded */
-                const RRGame *G = rr_game();
-                ap_abandon_mission();
-                *(int *)G->state = ps;
-                *(int *)(G->state + 4) = pn - 1;
-                g_reenter_mode = RR_MODE_LOADLEVEL;
-            } else if (ps != side) {
-                /* the other campaign: side and mission in the state block, then the level loading a loaded save
-                   goes through (a save holds nothing more about its side) */
-                const RRGame *G = rr_game();
-                *(int *)G->state = ps;
-                *(int *)(G->state + 4) = pn - 1;
-                g_reenter_mode = RR_MODE_LOADLEVEL;
-                rr_log("ap: campaign side switched to %d", ps);
-            }
-            g_reenter = 1;
-        }
+            /* The mission (and side) to load, then out through the doors into the level loading, like a loaded
+               save: the level's map, funds and parts are set up there. A mission in progress is given up. */
+            if (ingame) ap_abandon_mission();
+            ap_set_mission(ps, pn);
+            if (g_door_close && g_next_mode && g_door_flag) {
+                if (!*g_door_flag) g_door_close();
+                *g_next_mode = RR_MODE_LOADLEVEL;
+                rr_log("ap: doors closing (flag %d, next %lu)", *g_door_flag, *g_next_mode);
+            } else rr_log("ap: no doors (%p %p %p)", (void *)g_door_close, (void *)g_next_mode, (void *)g_door_flag);
+        } else ap_choose_mission(ps, pn);
     }
 }
