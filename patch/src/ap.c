@@ -239,6 +239,9 @@ static int g_preset_orig;
 static BYTE *g_boot_flag;
 static int *g_saved_side;   /* side of the last session (rrumble.ini): while set, the intro is skipped */   /* set while booting: no intro, the first briefing opens on the robot's menu */
 static DWORD g_prev_mode;
+/* The mission report (briefing after a win) shows the records of mission "level - 1": it reads this instead of the
+   level, which may have been changed to another mission since */
+int g_report_level;
 
 /* a mission left through the menu: no win, and the next briefing is a normal one */
 void ap_abandon_mission(void)
@@ -293,12 +296,14 @@ static int side_has_open_mission(int side)
 }
 
 /* The mission to play: the one picked in the menu, else the game's own next mission if it is unlocked (also a won
-   one: a replay), else the first unlocked mission not won yet. */
-static int pick_mission(void)
+   one: a replay). Right after a win whose next mission is locked: the won mission again, so you pick the next one
+   in the menu yourself. Otherwise the first unlocked mission not won yet. */
+static int pick_mission(int won)
 {
     int cur = *(int *)(G->state + 4) + 1, side = campaign_side();
     if (g_choose_mission && g_choose_side == side && mission_open(side, g_choose_mission)) return g_choose_mission;
     if (cur >= 1 && cur <= 16 && mission_open(side, cur)) return cur;
+    if (won) return won;
     for (int n = 1; n <= 16; n++)
         if (mission_open(side, n) && !is_checked(mission_id(side, n))) return n;
     for (int n = 1; n <= 16; n++)
@@ -377,7 +382,8 @@ static void on_mode(DWORD mode)
                 *(int *)G->state = to;
             }
         }
-        int n = pick_mission();
+        g_report_level = *level;   /* the game's own next mission: the report shows the records of the one before */
+        int n = pick_mission(won);
         if (*level != n - 1) {
             rr_log("ap: mission %d -> %d", *level + 1, n);
             *level = n - 1;
@@ -779,6 +785,45 @@ void ap_install(void)
         g_built_resume = built + 6;
         rr_write_jmp(built, (void *)built_stub, 6);
     } else rr_log("ap: robot spawn code not found, no build checks");
+
+    /* the report's three record lookups: mov reg,[side]; mov reg,[level]; shl reg,4; ...; lea reg,[..-1];
+       mov reg,[reg*4+records] -> read g_report_level instead of the level */
+    {
+        BYTE *base = (BYTE *)GetModuleHandleA(NULL);
+        IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+        IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(nt);
+        DWORD side_addr = (DWORD)G->state, level_addr = side_addr + 4;
+        BYTE *sites[3];
+        int found = 0;
+        for (int i = 0; i < nt->FileHeader.NumberOfSections; i++, sec++) {
+            if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+            BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 64;
+            for (; p < end; p++) {
+                int a = (p[0] == 0x8B && p[1] == 0x15) ? 2 : p[0] == 0xA1 ? 1 : 0;
+                if (!a || *(DWORD *)(p + a) != side_addr) continue;
+                BYTE *q = p + a + 4;
+                if (q[0] != 0x8B || (q[1] != 0x0D && q[1] != 0x15) || *(DWORD *)(q + 2) != level_addr) continue;
+                if (q[6] != 0xC1 || (q[7] != 0xE2 && q[7] != 0xE0) || q[8] != 0x04) continue;
+                int lea = 0, load = 0;
+                for (int k = 9; k < 49; k++) {
+                    if (!lea && q[k] == 0x8D && (q[k + 1] == 0x54 || q[k + 1] == 0x44) && q[k + 3] == 0xFF) lea = k;
+                    if (lea && k > lea && q[k] == 0x8B && (q[k + 1] == 0x14 || q[k + 1] == 0x0C) &&
+                        (q[k + 2] == 0x95 || q[k + 2] == 0x85)) { load = k; break; }
+                }
+                if (load && found < 3) sites[found] = q + 2;
+                if (load) found++;
+            }
+        }
+        if (found == 3) {
+            for (int i = 0; i < 3; i++) {
+                DWORD old;
+                VirtualProtect(sites[i], 4, PAGE_EXECUTE_READWRITE, &old);
+                *(DWORD *)sites[i] = (DWORD)&g_report_level;
+                VirtualProtect(sites[i], 4, old, &old);
+            }
+            rr_log("ap: mission report reads the played mission");
+        } else rr_log("ap: mission report code not found (%d)", found);
+    }
 
     BYTE *spy = rr_find_unique((const BYTE *)"\x2b\xc2\xba\xff\xff\xff\xff\x51\x89\x15", 10);
     if (spy && *(BYTE **)(spy + 15) == G->state + 8) g_spy_price = *(int **)(spy + 10);
