@@ -111,7 +111,9 @@ class RoboRumbleContext(Context):
     def unlocked_missions(self, side: int) -> List[int]:
         received = {item.item for item in self.items_received}
         wins = sum(1 for n in range(1, data.FINAL_MISSION) if data.mission_id(side, n) in self.checked_locations)
-        unlocked = [n for n in range(1, data.FINAL_MISSION) if n == 1 or data.mission_id(side, n) in received]
+        start = int(self.slot_data.get("start_side", self.sides()[0]))
+        unlocked = [n for n in range(1, data.FINAL_MISSION)
+                    if (n == 1 and side == start) or data.mission_id(side, n) in received]
         if wins >= int(self.slot_data.get("final_mission_wins", 10)):
             unlocked.append(data.FINAL_MISSION)
         return unlocked
@@ -142,9 +144,10 @@ class RoboRumbleContext(Context):
             return
         side = int(self.slot_data.get("side", 0))
         final_wins = int(self.slot_data.get("final_mission_wins", 10))
+        start_side = int(self.slot_data.get("start_side", 0 if side == 2 else side))
         seed_name = getattr(self, "server_seed_name", None) or self.seed_name or "seed"
         seed = "".join(c for c in seed_name if c.isalnum())[:40] + f"_{self.slot}"
-        await self.game_send(f"SLOT {side} {final_wins} {seed}")
+        await self.game_send(f"SLOT {side} {final_wins} {start_side} {seed}")
         await self.send_checked()
         await self.send_items()
 

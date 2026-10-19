@@ -9,7 +9,9 @@ it opens after a number of won missions of the same side (option `final_mission_
 
 ## What is the goal?
 
-Win the final mission against the Aliens (mission 16) - of both campaigns with `side: both`.
+Win the final mission against the Aliens (mission 16) - of both campaigns with `side: both`. With both sides, one
+campaign's mission 1 is open from the start (`starting_side`) and the other needs its Mission 1 Access item; Zuom IV's
+menu switches between the campaigns within one save.
 
 ## Which locations are checks?
 

@@ -43,7 +43,7 @@ static CRITICAL_SECTION g_cs;
 static int g_enabled, g_port;
 
 /* received from the client (under g_cs) */
-static int g_have_slot, g_side_mode, g_final_wins;   /* side mode 0 Red Star, 1 Terraflux, 2 both */
+static int g_have_slot, g_side_mode, g_final_wins, g_start_side;   /* side mode 0 Red Star, 1 Terraflux, 2 both */
 static char g_seed[64];
 static int *g_items, g_nitems;
 static int *g_checked, g_nchecked;
@@ -127,7 +127,7 @@ static int side_played(int side) { return g_side_mode == 2 || g_side_mode == sid
 /* mission 1 is always open, 2-15 need their access item, the final mission a number of wins on that side */
 static int mission_open(int side, int n)
 {
-    if (n == 1) return 1;
+    if (n == 1 && side == g_start_side) return 1;
     if (n < 16) return count_item(mission_id(side, n)) > 0;
     int wins = 0;
     for (int m = 1; m < 16; m++) wins += is_checked(mission_id(side, m));
@@ -384,12 +384,12 @@ static int *parse_ids(const char *s, int *n)
 static void handle(char *line)
 {
     if (!strncmp(line, "SLOT ", 5)) {
-        int side = 0, final_wins = 10;
+        int side = 0, final_wins = 10, start = 0;
         char seed[64] = "";
-        sscanf(line + 5, "%d %d %63s", &side, &final_wins, seed);
+        sscanf(line + 5, "%d %d %d %63s", &side, &final_wins, &start, seed);
         EnterCriticalSection(&g_cs);
         if (strcmp(seed, g_seed)) g_money_applied = -1;
-        g_side_mode = side; g_final_wins = final_wins;
+        g_side_mode = side; g_final_wins = final_wins; g_start_side = start;
         lstrcpynA(g_seed, seed, sizeof g_seed);
         g_have_slot = 1;
         LeaveCriticalSection(&g_cs);

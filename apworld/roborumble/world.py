@@ -9,7 +9,7 @@ from . import data
 from .options import RoboRumbleOptions
 
 SLOT_DATA_OPTIONS = (
-    "side", "starting_parts", "open_missions", "final_mission_wins", "logic_strictness", "booster_builds",
+    "side", "starting_side", "starting_parts", "open_missions", "final_mission_wins", "logic_strictness", "booster_builds",
     "combo_builds", "shop_checks", "spy_checks", "alien_artifacts", "extra_artifacts", "death_link",
 )
 
@@ -70,8 +70,8 @@ class RoboRumbleWorld(World):
         "Boosters": set(data.BOOSTERS),
         "Base Upgrades": set(data.UPGRADES),
         "Inventions": set(data.INVENTIONS),
-        "Red Star Mission Access": {data.mission_access(0, n) for n in range(2, data.FINAL_MISSION)},
-        "Terraflux Mission Access": {data.mission_access(1, n) for n in range(2, data.FINAL_MISSION)},
+        "Red Star Mission Access": {data.mission_access(0, n) for n in range(1, data.FINAL_MISSION)},
+        "Terraflux Mission Access": {data.mission_access(1, n) for n in range(1, data.FINAL_MISSION)},
     }
     location_name_groups = {
         "Red Star Missions": set(_all_missions(0)),
@@ -97,6 +97,8 @@ class RoboRumbleWorld(World):
                 getattr(self.options, option_name).value = passthrough[option_name]
 
         self.sides = [0, 1] if self.options.side == "both" else [self.options.side.value]
+        # the side whose first mission is open; with both sides the other one's needs its access item
+        self.start_side = self.options.starting_side.value if len(self.sides) == 2 else self.sides[0]
         if passthrough and "start_heads" in passthrough:
             self.start_heads = list(passthrough["start_heads"])
             self.start_legs = list(passthrough["start_legs"])
@@ -133,6 +135,8 @@ class RoboRumbleWorld(World):
 
         pool: List[RoboRumbleItem] = []
         for side in self.sides:
+            if side != self.start_side:
+                pool.append(self.create_item(data.mission_access(side, 1)))
             for number in range(2, data.FINAL_MISSION):
                 item = self.create_item(data.mission_access(side, number))
                 if number <= open_missions:
@@ -198,7 +202,9 @@ class RoboRumbleWorld(World):
         if mission == data.FINAL_MISSION:
             wins = sum(1 for n in range(1, data.FINAL_MISSION) if self.can_play(state, side, n))
             return wins >= self.options.final_mission_wins.value
-        return mission == 1 or state.has(data.mission_access(side, mission), self.player)
+        if mission == 1 and side == self.start_side:
+            return True
+        return state.has(data.mission_access(side, mission), self.player)
 
     def can_play(self, state: CollectionState, side: int, mission: int) -> bool:
         return self.mission_open(state, side, mission) and self.has_parts(state, side, mission)
@@ -245,6 +251,7 @@ class RoboRumbleWorld(World):
 
     def fill_slot_data(self) -> Dict[str, Any]:
         slot = {name: getattr(self.options, name).value for name in SLOT_DATA_OPTIONS}
+        slot["start_side"] = self.start_side
         slot["start_heads"] = self.start_heads
         slot["start_legs"] = self.start_legs
         return slot

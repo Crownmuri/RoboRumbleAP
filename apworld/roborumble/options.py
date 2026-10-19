@@ -16,6 +16,17 @@ class Side(Choice):
     default = 0
 
 
+class StartingSide(Choice):
+    """
+    With side: both, the campaign whose first mission is open from the start. The other side's first mission
+    needs its Mission 1 Access item.
+    """
+    display_name = "Starting Side"
+    option_red_star = 0
+    option_terraflux = 1
+    default = "random"
+
+
 class StartingParts(Choice):
     """
     What you can build at the start.
@@ -116,6 +127,7 @@ class ExtraArtifacts(Range):
 @dataclass
 class RoboRumbleOptions(PerGameCommonOptions):
     side: Side
+    starting_side: StartingSide
     starting_parts: StartingParts
     open_missions: OpenMissions
     final_mission_wins: FinalMissionWins

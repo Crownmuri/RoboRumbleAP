@@ -59,20 +59,11 @@ static const char *k_script =
     "\n"
     ":ap_side_a\n"
     "SWITCH\n"
-    "IF AP_SIDE = 0 THEN ap_a1\n"
-    "GOTO ap_other_side\n"
+    "GOTO ap_a1\n"
     "\n"
     ":ap_side_b\n"
     "SWITCH\n"
-    "IF AP_SIDE = 1 THEN ap_b1\n"
-    "GOTO ap_other_side\n"
-    "\n"
-    ":ap_other_side\n"
-    "TALKER\n"
-    "  >>do_menu\n"
-    "    Those missions b-b-b-belong to the\n"
-    "    other campaign, master. Start a new\n"
-    "    campaign on that side to play them.\n"
+    "GOTO ap_b1\n"
     "\n"
     ":ap_locked\n"
     "TALKER\n"
@@ -204,8 +195,10 @@ static int get_var(const char *name, int dflt)
     return dflt;
 }
 
-/* the briefing ends its loop when this is set; it returns BRIEFING and so starts over */
+/* the briefing ends its loop when this is set; it returns g_reenter_mode: BRIEFING starts it over, LOADLEVEL
+   (after a side switch) goes the way a loaded save goes */
 BYTE g_reenter;
+DWORD g_reenter_mode = RR_MODE_BRIEFING;
 void *g_reenter_resume, *g_reenter_exit;
 BYTE *g_reenter_flag;
 __asm__(
@@ -215,7 +208,7 @@ __asm__(
     "    cmpb $0, _g_reenter\n"
     "    je 1f\n"
     "    movb $0, _g_reenter\n"
-    "    movl $7, %eax\n"
+    "    movl _g_reenter_mode, %eax\n"
     "    jmp *_g_reenter_exit\n"
     "1:  movl _g_reenter_flag, %eax\n"
     "    movb (%eax), %al\n"
@@ -297,6 +290,18 @@ void apdlg_tick(void)
         int ps = pick > 100 ? 1 : 0, pn = pick % 100;
         rr_log("ap: mission %d of side %d picked in the briefing", pn, ps);
         ap_choose_mission(ps, pn);
-        if (mode == RR_MODE_BRIEFING && ps == side) g_reenter = 1;
+        if (mode == RR_MODE_BRIEFING) {
+            g_reenter_mode = RR_MODE_BRIEFING;
+            if (ps != side) {
+                /* the other campaign: side and mission in the state block, then the level loading a loaded save
+                   goes through (a save holds nothing more about its side) */
+                const RRGame *G = rr_game();
+                *(int *)G->state = ps;
+                *(int *)(G->state + 4) = pn - 1;
+                g_reenter_mode = RR_MODE_LOADLEVEL;
+                rr_log("ap: campaign side switched to %d", ps);
+            }
+            g_reenter = 1;
+        }
     }
 }
