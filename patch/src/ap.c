@@ -17,7 +17,7 @@
    - boosters, base upgrades and inventions are "owned" while a mission runs if they were received
    - in the briefing the engineer's shop shows what is still a check: unchecked goods can be bought, checked ones
      are greyed; a purchase sends its check instead of giving the good
-   - mission won, robot ordered (weapon, legs, combination, booster), spy report bought -> checks
+   - mission won, robot finished (weapon, legs, combination, booster), spy report bought -> checks
    - missions: when the briefing or the level loading comes up, the mission to play is switched to the one the
      player chose (MISSION) or else to the first unlocked mission that isn't won yet */
 #include "common.h"
@@ -230,16 +230,14 @@ static void on_mode(DWORD mode)
     send_line("STATE %lu %d", mode, *(int *)(G->state + 4) + 1);
 }
 
-/* ---------------------------------------------------------------- robot orders */
+/* ---------------------------------------------------------------- robots */
+/* Orders only get logged: an order can still be cancelled. The checks come when the robot leaves the factory. */
 void *g_order_resume;
+static int g_last_order[3] = { -1, -1, -1 };
 void __cdecl ap_robot_ordered(int head, int legs, int booster)
 {
-    if (!g_have_slot) return;
+    g_last_order[0] = head; g_last_order[1] = legs; g_last_order[2] = booster;
     rr_log("ap: robot ordered: head %d legs %d booster %d", head, legs, booster);
-    if (head >= 0 && head < 16) check(HEAD_OFFSET + head);
-    if (legs >= 0 && legs < 16) check(LEGS_OFFSET + legs);
-    if (head >= 0 && head < 16 && legs >= 0 && legs < 16) check(COMBO_OFFSET + head * 16 + legs);
-    if (booster >= 0 && booster < 9) check(BOOSTER_OFFSET + booster);
 }
 
 /* entry of the order function: edx = weapon type, ecx = legs type, [esp+16] = booster (-1 = none) */
@@ -260,6 +258,51 @@ __asm__(
     "    subl $16, %esp\n"
     "    jmp *_g_order_resume\n");
 void order_stub(void);
+
+/* A robot of the local player came out of the factory (the spawn code counts it for "robos produced").
+   robot +0x1C weapon object, +0x20 legs object (each: +8 -> +0x18 = part type), +0x470 booster (-1 = none) */
+void *g_built_resume;
+DWORD *g_produced_counter;
+static int part_type(BYTE *part)
+{
+    if (IsBadReadPtr(part, 0x0C)) return -1;
+    BYTE *def = *(BYTE **)(part + 8);
+    if (IsBadReadPtr(def, 0x1C)) return -1;
+    return *(int *)(def + 0x18);
+}
+
+void __cdecl ap_robot_built(BYTE *robot)
+{
+    if (!robot || IsBadReadPtr(robot, 0x474)) return;
+    /* the part types are the parts' text numbers: weapons 100-115, legs 200-215 */
+    int head = part_type(*(BYTE **)(robot + 0x1C)) - 100;
+    int legs = part_type(*(BYTE **)(robot + 0x20)) - 200;
+    int booster = *(int *)(robot + 0x470);
+    rr_log("ap: robot built: head %d legs %d booster %d (ordered %d %d %d)", head, legs, booster,
+           g_last_order[0], g_last_order[1], g_last_order[2]);
+    if (!g_have_slot) return;
+    if (head >= 0 && head < 16) check(HEAD_OFFSET + head);
+    if (legs >= 0 && legs < 16) check(LEGS_OFFSET + legs);
+    if (head >= 0 && head < 16 && legs >= 0 && legs < 16) check(COMBO_OFFSET + head * 16 + legs);
+    if (booster >= 0 && booster < 9) check(BOOSTER_OFFSET + booster);
+}
+
+/* replaces "inc dword [robos produced]"; esi = the new robot */
+__asm__(
+    ".text\n"
+    ".globl _built_stub\n"
+    "_built_stub:\n"
+    "    pushal\n"
+    "    pushl %esi\n"
+    "    call _ap_robot_built\n"
+    "    addl $4, %esp\n"
+    "    popal\n"
+    "    pushl %eax\n"
+    "    movl _g_produced_counter, %eax\n"
+    "    incl (%eax)\n"
+    "    popl %eax\n"
+    "    jmp *_g_built_resume\n");
+void built_stub(void);
 
 /* ---------------------------------------------------------------- game thread */
 static void tick(void)
@@ -424,6 +467,27 @@ void ap_install(void)
         rr_write_jmp(order, (void *)order_stub, 6);
     } else rr_log("ap: robot order code not found, no build checks");
 
+    /* cmp ebp,[local player]; je +8; inc [enemy produced]; jmp +6; inc [produced]; mov [esp],esi; call */
+    BYTE *built = NULL;
+    {
+        BYTE *base = (BYTE *)GetModuleHandleA(NULL);
+        IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+        IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(nt);
+        for (int i = 0; i < nt->FileHeader.NumberOfSections && !built; i++, sec++) {
+            if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+            BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 32;
+            for (; p < end; p++)
+                if (p[0] == 0x3B && p[1] == 0x2D && p[6] == 0x74 && p[7] == 0x08 && p[8] == 0xFF && p[9] == 0x05 &&
+                    p[14] == 0xEB && p[15] == 0x06 && p[16] == 0xFF && p[17] == 0x05 &&
+                    p[22] == 0x89 && p[23] == 0x34 && p[24] == 0x24 && p[25] == 0xE8) { built = p + 16; break; }
+        }
+    }
+    if (built) {
+        g_produced_counter = *(DWORD **)(built + 2);
+        g_built_resume = built + 6;
+        rr_write_jmp(built, (void *)built_stub, 6);
+    } else rr_log("ap: robot spawn code not found, no build checks");
+
     BYTE *spy = rr_find_unique((const BYTE *)"\x2b\xc2\xba\xff\xff\xff\xff\x51\x89\x15", 10);
     if (spy && *(BYTE **)(spy + 15) == G->state + 8) g_spy_price = *(int **)(spy + 10);
     else rr_log("ap: spy code not found, no spy checks");
@@ -432,5 +496,5 @@ void ap_install(void)
     prev_PeekMessageA = rr_hook_iat(exe, "USER32.dll", "PeekMessageA", (void *)ap_PeekMessageA);
     prev_GetMessageA = rr_hook_iat(exe, "USER32.dll", "GetMessageA", (void *)ap_GetMessageA);
     CloseHandle(CreateThread(NULL, 0, net_thread, NULL, 0, NULL));
-    rr_log("ap: waiting for the client on port %d (order %p, spy price %p)", g_port, order, g_spy_price);
+    rr_log("ap: waiting for the client on port %d (order %p, built %p, spy price %p)", g_port, order, built, g_spy_price);
 }
