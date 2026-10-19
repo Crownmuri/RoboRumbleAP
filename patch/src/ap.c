@@ -248,6 +248,8 @@ void ap_abandon_mission(void)
 }
 int ap_mission_in_progress(void) { return g_mission_running != 0; }
 int ap_goal_done(void) { return g_goal_done != 0; }
+/* Watch the epilogue was picked: the client completes the goal now (and the room releases) */
+void ap_epilogue_watched(void) { send_line("EPILOGUE"); }
 /* alien_artifacts_only: how many artifacts are still missing (-1 with another goal) */
 int ap_artifacts_missing(void)
 {

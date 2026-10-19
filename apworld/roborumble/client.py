@@ -236,10 +236,11 @@ class RoboRumbleContext(Context):
         if self.finished_game or not self.slot:
             return
         if self.goal() == 2:
-            if self.artifacts() < int(self.slot_data.get("alien_artifacts", 10)):
-                return
-            await self.game_send("GOAL")   # the robot offers the epilogue
-        elif any(data.mission_id(s, data.FINAL_MISSION) not in self.checked_locations for s in self.sides()):
+            # the robot offers the epilogue; the goal counts once it is watched (EPILOGUE from the game)
+            if self.artifacts() >= int(self.slot_data.get("alien_artifacts", 10)):
+                await self.game_send("GOAL")
+            return
+        if any(data.mission_id(s, data.FINAL_MISSION) not in self.checked_locations for s in self.sides()):
             return
         self.finished_game = True
         await self.send_msgs([{"cmd": "StatusUpdate", "status": CommonClient.ClientStatus.CLIENT_GOAL}])
@@ -315,6 +316,10 @@ class RoboRumbleContext(Context):
                         int(self.slot_data.get("spy_checks", 0)) == 2:
                     await self.spy_hint()
                 await self.check_goal()
+        elif cmd == "EPILOGUE" and self.slot and not self.finished_game:
+            self.finished_game = True
+            await self.send_msgs([{"cmd": "StatusUpdate", "status": CommonClient.ClientStatus.CLIENT_GOAL}])
+            CommonClient.logger.info("Goal reached: the epilogue was watched!")
         elif cmd == "STATE":
             self.game_state = [int(v) for v in rest.split()]
 

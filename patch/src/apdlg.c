@@ -24,6 +24,7 @@ int ap_mission_in_progress(void);
 void ap_abandon_mission(void);
 void ap_set_mission(int side, int n);
 int ap_goal_done(void);
+void ap_epilogue_watched(void);
 int ap_artifacts_missing(void);
 static char *g_choice_text;   /* the choices' texts, 0x8c each */
 static void (__cdecl *g_outro)(void);   /* the game's ending: fade out, outro2.avi */
@@ -537,6 +538,7 @@ void apdlg_tick(void)
         set_var("AP_PICK", 0);
         if (pick == 997) {   /* the epilogue: the game's ending (outro2), then the credits */
             rr_log("ap: epilogue");
+            ap_epilogue_watched();
             g_epilogue = 1;   /* the outro plays when the credits screen starts */
             if (g_door_close && g_next_mode && g_door_flag) {
                 if (!*g_door_flag) g_door_close();
