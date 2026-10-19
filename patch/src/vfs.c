@@ -416,6 +416,15 @@ void vfs_install(void)
     build_merged_adjust();
     build_sfx();
     apdlg_generate();
+    /* The mission records (time, efficiency and base energy to beat for the report's bonuses) are read at
+       startup, before the paks are open, so hiscores.dat in misc.pak is never found and every record is 0
+       (no time bonus ever). A loose copy is read fine. */
+    {
+        DWORD size;
+        char *records = pak_read("pak\\misc.pak", "hiscores.dat", &size);
+        if (records && rr_vfs_generate("hiscores.dat", records, size)) rr_log("vfs: mission records from misc.pak");
+        free(records);
+    }
     if (!g_merged_adjust[0] && !g_generated_count && !g_cfg.override_enabled && !g_log_files) return;
     BYTE *fn = rr_find_unique(k_vfs_open_sig, sizeof k_vfs_open_sig);
     if (!fn) { rr_log("vfs: open function not found, overrides off"); g_merged_adjust[0] = 0; return; }
