@@ -227,6 +227,8 @@ static int g_last_spy;
 
 static void (__cdecl *g_level_banner)(int level);   /* draws "LEVEL n" on the loading screen */
 static DWORD *g_in_mission;   /* the briefing shows the in-mission menu while this is set */
+static int *g_preset_side;    /* new campaign: side + 1 skips the faction screen (0 = the player picks) */
+static int g_preset_orig;
 static DWORD g_prev_mode;
 
 /* a mission left through the menu: no win, and the next briefing is a normal one */
@@ -259,6 +261,13 @@ static int pick_mission(void)
 
 static void on_mode(DWORD mode)
 {
+    /* Start a new campaign (faction screen next): with a slot the campaign is that of the slot's side, so the
+       faction screen is skipped and the first briefing of that side follows */
+    if (mode == 9 && g_preset_side) {
+        int side = g_side_mode == 2 ? g_start_side : g_side_mode;
+        *g_preset_side = g_have_slot ? side + 1 : g_preset_orig;
+        if (g_have_slot) rr_log("ap: new campaign on side %d, faction screen skipped", side);
+    }
     if (!G || !g_have_slot) return;
     EnterCriticalSection(&g_cs);
     DWORD prev = g_prev_mode;
@@ -589,6 +598,26 @@ void ap_install(void)
                 }
         }
         if (!g_level_banner) rr_log("ap: level banner not found");
+    }
+
+    /* new campaign: mov eax,[preset side]; test eax,eax; jne preset; mov al,0; mov edx,[..]; test edx,edx; mov [esp+..],al */
+    {
+        BYTE *base = (BYTE *)GetModuleHandleA(NULL);
+        IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+        IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(nt);
+        for (int i = 0; i < nt->FileHeader.NumberOfSections && !g_preset_side; i++, sec++) {
+            if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+            BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 32;
+            for (; p < end; p++)
+                if (p[0] == 0xA1 && p[5] == 0x85 && p[6] == 0xC0 && p[7] == 0x0F && p[8] == 0x85 && p[13] == 0xB0 &&
+                    p[14] == 0 && p[15] == 0x8B && p[16] == 0x15 && p[21] == 0x85 && p[22] == 0xD2 && p[23] == 0x88 &&
+                    p[24] == 0x84 && p[25] == 0x24) {
+                    g_preset_side = *(int **)(p + 1);
+                    g_preset_orig = *g_preset_side;
+                    break;
+                }
+        }
+        if (!g_preset_side) rr_log("ap: faction preset not found, the faction screen stays");
     }
 
     HMODULE exe = GetModuleHandleA(NULL);

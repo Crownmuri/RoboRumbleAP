@@ -135,6 +135,10 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
     if (ini_int("general", "skip_task_warning", 1) &&
         rr_hook_iat(GetModuleHandleA(NULL), "USER32.dll", "EnumWindows", (void *)no_EnumWindows))
         rr_log("background-task warning disabled");
+    /* Scenes like the campaign intro wait for a click without reading window messages. Windows then puts a
+       "Not Responding" ghost window in front, which takes the clicks and the foreground, and the game never
+       sees the click. The game is never really hung, so no ghosting. */
+    DisableProcessWindowsGhosting();
     vfs_install();
     cd_install();
     ddwin_install();
