@@ -1,0 +1,11 @@
+patch/build/
+build/
+*.apworld
+__pycache__/
+*.pyc
+.vs/
+.vscode/
+.idea/
+
+# extracted game data (tools) - do not commit game assets
+dump/

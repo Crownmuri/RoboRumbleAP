@@ -1,0 +1,9 @@
+{
+    "authors": ["Crownmuri"],
+    "compatible_version": 7,
+    "flags": [],
+    "game": "RoboRumble",
+    "minimum_ap_version": "0.6.7",
+    "version": 7,
+    "world_version": "0.1.0"
+}
