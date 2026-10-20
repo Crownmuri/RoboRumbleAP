@@ -159,7 +159,7 @@ recommended: Speed Booster | Maximum Defense Booster
 # corridor's right tube (they shoot a short way over it), the Laser walks down the corridor until the Homing
 # Missiles come out, then back up past the Erasers. The Laser's Alien Defense Booster (pick it up on the way)
 # wears off, so lure soon after picking it up.
-need: Eraser
+need: Eraser | Nitrogrenade & 1 damage weapon
 recommended: Laser
 
 == Terraflux Mission 2 ==
