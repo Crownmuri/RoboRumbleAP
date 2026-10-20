@@ -81,7 +81,7 @@ class RoboRumbleCommandProcessor(CommandProcessor):
             self.output(f"{data.SIDES[s]} mission {n} is still locked.")
             return
         Utils.async_start(ctx.game_send(f"MISSION {s} {n}"))
-        self.output(f"{data.SIDES[s]} mission {n} is played next, from the next briefing on.")
+        self.output(f"{data.SIDES[s]} mission {n} is played next (in a briefing it loads right away).")
 
     def _cmd_dev(self, *args: str) -> None:
         """Dev commands for testing, /dev help lists them. Needs roborumble_options.dev_mode in host.yaml."""

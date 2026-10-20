@@ -42,6 +42,8 @@
 == Red Star Mission 1 ==
 # The enemy waits until you come close. Guide: 5x Rocket Launcher with Shield or Fire Frequency.
 # Hidden rule (game code): the mission is lost when 3 of your robos are destroyed.
+# Won in game: 1600 funds = 5x Rocket Launcher/2-Legs/Shield (300 each), up the left corridor, attacking the
+# Lasers at the top from the left end; 2 robos lost.
 need: damage weapon
 recommended: Rocket Launcher | Chain Gun
 

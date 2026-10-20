@@ -303,6 +303,10 @@ int ap_mission_open(int side, int n)
     return open;
 }
 
+/* the client's /mission: taken by the briefing (apdlg), which loads it right away like its own mission picker */
+static volatile LONG g_client_pick;
+int ap_take_client_pick(void) { return (int)InterlockedExchange(&g_client_pick, 0); }
+
 void ap_choose_mission(int side, int n)
 {
     EnterCriticalSection(&g_cs);
@@ -481,7 +485,10 @@ static void on_mode(DWORD mode)
             *level = n - 1;
             if (g_level_banner) g_level_banner(*level);
         }
-        if (mode == RR_MODE_LOADLEVEL) g_choose_mission = 0;
+        if (mode == RR_MODE_LOADLEVEL) {
+            g_choose_mission = 0;
+            InterlockedExchange(&g_client_pick, 0);   /* this load used the client's pick */
+        }
     }
     int add_funds = 0;
     if (mode == RR_MODE_GAMEPLAY && !g_mission_running) {
@@ -815,6 +822,7 @@ static void handle(char *line)
         g_choose_side = side;
         g_choose_mission = n >= 1 && n <= 16 ? n : 0;
         LeaveCriticalSection(&g_cs);
+        if (g_choose_mission) InterlockedExchange(&g_client_pick, (side ? 100 : 0) + n);
         rr_log("ap: next mission %d of side %d", n, side);
     } else if (!strcmp(line, "GOAL")) {
         if (!InterlockedExchange(&g_goal_done, 1)) {

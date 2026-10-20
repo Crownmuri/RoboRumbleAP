@@ -19,6 +19,7 @@
 int ap_side_mode(void);                    /* -1 = no slot, 0/1 = one side, 2 = both */
 int ap_mission_open(int side, int n);
 void ap_choose_mission(int side, int n);
+int ap_take_client_pick(void);
 int ap_campaign_side(void);
 int ap_mission_in_progress(void);
 void ap_abandon_mission(void);
@@ -756,6 +757,10 @@ void apdlg_tick(void)
             set_var(name, ap_mission_open(s, n));
         }
     int pick = get_var("AP_PICK", 0);
+    /* the client's /mission: in a briefing it loads now, like a pick here; elsewhere it already waits for the next
+       level load */
+    int client_pick = ap_take_client_pick();
+    if (!pick && client_pick && mode == RR_MODE_BRIEFING) pick = client_pick;
     if (pick) {
         set_var("AP_PICK", 0);
         if (pick == 997) {   /* the epilogue: the game's ending (outro2), then the credits */
