@@ -155,6 +155,10 @@ recommended: Speed Booster | Maximum Defense Booster
 # Hidden rule (game code): the mission is lost when 2 of your robos are destroyed. Tested 2026-10-20: Lasers,
 # Whirlwinds, Nitrogrenades and Maximum Defense on Jet-Cars lost twice; the Erasers (shooting through the
 # corridor's walls) are what makes it work.
+# Won 2026-10-20 the guide's way (1 robo lost): 6x Eraser/Fire Frequency on the outside of the long vertical entrance
+# corridor's right tube (they shoot a short way over it), the Laser walks down the corridor until the Homing
+# Missiles come out, then back up past the Erasers. The Laser's Alien Defense Booster (pick it up on the way)
+# wears off, so lure soon after picking it up.
 need: Eraser
 recommended: Laser
 
