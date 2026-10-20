@@ -147,6 +147,7 @@ void traps_dev_fire(int trap)
 void traps_tick(void)
 {
     if (!g_ready) return;
+    if (g_gui_mode == RR_MODE_SHOP) return;   /* the robot builder is open: the mission waits */
     if (g_gui_mode != RR_MODE_GAMEPLAY) {   /* a mission ended: its robots are gone */
         memset(g_mines, 0, sizeof g_mines);
         g_nseen = 0;

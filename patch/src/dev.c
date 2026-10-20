@@ -234,8 +234,8 @@ void dev_tick(void)
 {
     if (!g_ready) return;
     if (g_money) *(int *)(G->state + 8) = 99000000;
-    if (g_gui_mode != RR_MODE_GAMEPLAY) {
-        g_nsaved = 0;   /* the mission's robots are gone */
+    if (g_gui_mode != RR_MODE_GAMEPLAY && g_gui_mode != RR_MODE_SHOP) {
+        g_nsaved = 0;   /* the mission's robots are gone (the robot builder, mode 5, is still the mission) */
         return;
     }
     if (g_god) god_tick();
