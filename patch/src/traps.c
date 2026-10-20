@@ -136,6 +136,14 @@ static char *state_path(char *buf, size_t n)
 }
 
 /* game thread, during missions */
+static volatile LONG g_dev_pending[TRAPS];
+
+/* the client's /dev trap (any thread): set off next time a mission has a robot to hit */
+void traps_dev_fire(int trap)
+{
+    if (trap >= 0 && trap < TRAPS) InterlockedIncrement(&g_dev_pending[trap]);
+}
+
 void traps_tick(void)
 {
     if (!g_ready) return;
@@ -164,6 +172,9 @@ void traps_tick(void)
         }
         g_mines[i].robot = NULL;
     }
+    /* traps asked for by the client's /dev trap: wait until there is a robot to hit */
+    for (int t = 0; t < TRAPS; t++)
+        if (g_dev_pending[t] > 0 && fire(t)) { InterlockedDecrement(&g_dev_pending[t]); rr_log("trap: dev %s", k_trap_names[t]); }
     /* [ap] trap_keys=1 in rrpatch.ini (testing): F5-F9 set off one trap each */
     static int keys = -1;
     if (keys < 0) keys = GetPrivateProfileIntA("ap", "trap_keys", 0, g_ini_path);

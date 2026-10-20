@@ -69,10 +69,17 @@ static const RRGame *G;
 static int *g_spy_price;
 
 /* ---------------------------------------------------------------- helpers */
+/* dev mode (client /dev, host.yaml dev_mode): items given locally, and actions run on the game thread */
+static int g_dev_items[256], g_ndev;
+static volatile LONG g_dev_end;          /* 1 win / 2 lose the mission */
+static volatile LONG g_dev_money_op;     /* 1 set / 2 add g_dev_money */
+static volatile LONG g_dev_money;
+
 static int count_item(int id)
 {
     int n = 0;
     for (int i = 0; i < g_nitems; i++) n += g_items[i] == id;
+    for (int i = 0; i < g_ndev; i++) n += g_dev_items[i] == id;
     return n;
 }
 
@@ -285,6 +292,7 @@ int ap_goal_done(void) { return g_goal_done != 0; }
 /* for traps.c */
 void traps_install(int *local_player);
 void traps_tick(void);
+void traps_dev_fire(int trap);
 int ap_item_count(int id)
 {
     EnterCriticalSection(&g_cs);
@@ -568,6 +576,17 @@ static void tick(void)
         }
     }
     LeaveCriticalSection(&g_cs);
+    LONG end = InterlockedExchange(&g_dev_end, 0);
+    if (end && G->winflag) {
+        if (g_gui_mode == RR_MODE_GAMEPLAY) { *G->winflag = (DWORD)end; rr_log("dev: %s the mission", end == 1 ? "win" : "lose"); }
+        else queue_message("Dev: not in a mission.");
+    }
+    LONG op = InterlockedExchange(&g_dev_money_op, 0);
+    if (op) {
+        int *money = (int *)(G->state + 8);
+        *money = op == 1 ? (int)g_dev_money : *money + (int)g_dev_money;
+        rr_log("dev: money %d", *money);
+    }
     apdlg_tick();
     traps_tick();
     show_messages();
@@ -721,6 +740,31 @@ static void handle(char *line)
             EnterCriticalSection(&g_cs);
             lstrcpynA(g_shop_label[side][slot], line + 9 + used, sizeof g_shop_label[0][0]);
             LeaveCriticalSection(&g_cs);
+        }
+    } else if (!strncmp(line, "DEV ", 4)) {
+        /* DEV GIVE id | DEV CLEAR | DEV TRAP t | DEV WIN | DEV LOSE | DEV MONEY n | DEV ADDMONEY n */
+        const char *a = line + 4;
+        int v = 0;
+        if (sscanf(a, "GIVE %d", &v) == 1) {
+            EnterCriticalSection(&g_cs);
+            if (g_ndev < (int)(sizeof g_dev_items / sizeof g_dev_items[0])) g_dev_items[g_ndev++] = v;
+            LeaveCriticalSection(&g_cs);
+            rr_log("dev: give item %d", v);
+        } else if (!strcmp(a, "CLEAR")) {
+            EnterCriticalSection(&g_cs);
+            g_ndev = 0;
+            LeaveCriticalSection(&g_cs);
+            rr_log("dev: given items cleared");
+        } else if (sscanf(a, "TRAP %d", &v) == 1) {
+            traps_dev_fire(v);
+        } else if (!strcmp(a, "WIN")) {
+            InterlockedExchange(&g_dev_end, 1);
+        } else if (!strcmp(a, "LOSE")) {
+            InterlockedExchange(&g_dev_end, 2);
+        } else if (sscanf(a, "MONEY %d", &v) == 1) {
+            g_dev_money = v; InterlockedExchange(&g_dev_money_op, 1);
+        } else if (sscanf(a, "ADDMONEY %d", &v) == 1) {
+            g_dev_money = v; InterlockedExchange(&g_dev_money_op, 2);
         }
     } else if (!strncmp(line, "MSG ", 4)) {
         rr_log("ap: %s", line + 4);

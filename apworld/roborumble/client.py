@@ -29,6 +29,22 @@ except ModuleNotFoundError:
 
 DEFAULT_PORT = 38480
 
+DEV_HELP = (
+    "/dev trap <oil|freeze|disruptor|mine|nuke>: set off a trap on one of your robots",
+    "/dev win, /dev lose: end the mission you are playing",
+    "/dev money <amount>: set your shop money; /dev money +<amount> adds to it",
+    "/dev give <item>: give yourself an item in the game only (part, booster, upgrade, invention, mission access,",
+    "    artifact); the server doesn't know about it. /dev give all: every part and booster. /dev give clear: take",
+    "    them back (they are also gone when the game restarts)",
+    "Building or buying with given items still sends their checks.",
+)
+
+
+def dev_givable() -> Dict[str, int]:
+    """Items /dev give can give: everything but filler (Shop Money is counted once per item) and traps."""
+    skip = set(data.FILLER.values()) | set(data.TRAPS.values())
+    return {name: item_id for name, item_id in data.item_table().items() if name not in skip}
+
 
 class RoboRumbleCommandProcessor(CommandProcessor):
     ctx: "RoboRumbleContext"
@@ -56,6 +72,65 @@ class RoboRumbleCommandProcessor(CommandProcessor):
             return
         Utils.async_start(ctx.game_send(f"MISSION {s} {n}"))
         self.output(f"{data.SIDES[s]} mission {n} is played next, from the next briefing on.")
+
+    def _cmd_dev(self, *args: str) -> None:
+        """Dev commands for testing, /dev help lists them. Needs roborumble_options.dev_mode in host.yaml."""
+        ctx = self.ctx
+        if not ctx.world_settings("dev_mode", False):
+            self.output("Dev commands are off. Set roborumble_options.dev_mode to true in host.yaml.")
+            return
+        sub = args[0].lower() if args else "help"
+        rest = " ".join(args[1:]).strip()
+        if sub == "help":
+            for line in DEV_HELP:
+                self.output(line)
+            return
+        if ctx.game_writer is None:
+            self.output("The game is not connected.")
+            return
+        lines: List[str] = []
+        if sub == "trap":
+            names = [name.split()[0].lower() for name in data.TRAPS.values()]
+            if rest.lower() not in names:
+                self.output("Usage: /dev trap <" + "|".join(names) + ">")
+                return
+            lines.append(f"DEV TRAP {names.index(rest.lower())}")
+            self.output(f"{rest.capitalize()} trap: goes off on one of your robots (in the next mission if you aren't in one).")
+        elif sub in ("win", "lose"):
+            lines.append(f"DEV {sub.upper()}")
+            self.output(f"The mission is {'won' if sub == 'win' else 'lost'}.")
+        elif sub == "money":
+            try:
+                amount = int(rest.replace(",", "").replace(" ", "").lstrip("+"))
+            except ValueError:
+                self.output("Usage: /dev money <amount> sets it, /dev money +<amount> adds to it.")
+                return
+            lines.append(f"DEV {'ADDMONEY' if rest.startswith('+') else 'MONEY'} {amount}")
+            self.output(f"Shop money {'+' if rest.startswith('+') else '= '}{amount:,}.")
+        elif sub == "give":
+            givable = dev_givable()
+            if rest.lower() == "clear":
+                lines.append("DEV CLEAR")
+                self.output("The items given with /dev give are gone again.")
+            elif rest.lower() == "all":
+                parts = list(data.HEADS) + list(data.LEGS) + list(data.BOOSTERS)
+                lines += [f"DEV GIVE {givable[name]}" for name in parts]
+                self.output("Given: every weapon, legs and booster.")
+            else:
+                name, usable, response = Utils.get_intended_text(rest, list(givable))
+                containing = [n for n in givable if rest.lower() in n.lower()]
+                if not usable and len(containing) == 1:
+                    name, usable = containing[0], True
+                if not usable:
+                    self.output(response)
+                    return
+                lines.append(f"DEV GIVE {givable[name]}")
+                self.output(f"Given: {name}.")
+        else:
+            self.output(f"Unknown dev command {sub}. /dev help lists them.")
+            return
+        for line in lines:
+            Utils.async_start(ctx.game_send(line))
 
     def _cmd_patch(self) -> None:
         """Install the game patch (winmm.dll) into the RoboRumble folder and switch Archipelago on in it."""

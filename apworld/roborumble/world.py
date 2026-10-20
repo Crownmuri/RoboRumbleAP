@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 
 import settings
 
@@ -34,9 +34,13 @@ class RoboRumbleSettings(settings.Group):
     class BridgePort(int):
         """Local port the client listens on for the game patch ([ap] port in the game's rrpatch.ini)."""
 
+    class DevMode(settings.Bool):
+        """Allows the client's /dev commands: set off traps, win or lose the mission, set money, give yourself parts."""
+
     game_path: GamePath = GamePath("")
     renderer: Renderer = Renderer("auto")
     bridge_port: BridgePort = BridgePort(38480)
+    dev_mode: Union[DevMode, bool] = False
 
 
 class RoboRumbleWebWorld(WebWorld):
