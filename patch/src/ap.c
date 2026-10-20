@@ -31,7 +31,8 @@
 #define UPGRADE_OFFSET 3100
 #define INVENTION_OFFSET 3200
 #define MISSION_OFFSET 4000
-#define FILLER_SHOP_MONEY 5002
+/* Money items: id -> amount for the shop (data.py MONEY) */
+static const struct { int id, amount; } k_money[] = { { 5002, 500000 }, { 5003, 250000 }, { 5004, 1000000 }, { 5005, 2000000 } };
 #define ROBO_FUNDS_ID 5001       /* Progressive Starting Robo Funds */
 #define ROBO_FUNDS_STEP 400
 #define COMBO_OFFSET 6000
@@ -40,7 +41,6 @@
 #define BONUS_OFFSET 7500   /* + 100 * side + 20 * kind (0 time, 1 base energy, 2 efficiency) + mission */
 
 #define SHOP_SLOTS 22   /* 9 boosters, U1-U10, S1-S3 */
-#define SHOP_MONEY 500000
 
 static CRITICAL_SECTION g_cs;
 static int g_enabled, g_port;
@@ -224,18 +224,22 @@ static void apply(void)
         g_shop_view = 0;
     }
 
-    /* Shop Money: added once per item; how many were added is kept per seed */
-    int money = count_item(FILLER_SHOP_MONEY);
+    /* Money items ("$500 000 Money"): added once each; the total added so far is kept per seed (older versions kept
+       the number of $500 000 items as shop_money_applied) */
+    int money = 0;
+    for (int i = 0; i < (int)(sizeof k_money / sizeof k_money[0]); i++) money += count_item(k_money[i].id) * k_money[i].amount;
     if (g_money_applied < 0) {
         char p[MAX_PATH];
-        g_money_applied = GetPrivateProfileIntA(g_seed, "shop_money_applied", 0, state_path(p, sizeof p));
+        state_path(p, sizeof p);
+        g_money_applied = GetPrivateProfileIntA(g_seed, "money_applied", -1, p);
+        if (g_money_applied < 0) g_money_applied = GetPrivateProfileIntA(g_seed, "shop_money_applied", 0, p) * 500000;
     }
     if (money > g_money_applied) {
-        *(int *)(S + 8) += (money - g_money_applied) * SHOP_MONEY;
+        *(int *)(S + 8) += money - g_money_applied;
         g_money_applied = money;
         char p[MAX_PATH], v[16];
         snprintf(v, sizeof v, "%d", money);
-        WritePrivateProfileStringA(g_seed, "shop_money_applied", v, state_path(p, sizeof p));
+        WritePrivateProfileStringA(g_seed, "money_applied", v, state_path(p, sizeof p));
     }
 }
 

@@ -10,7 +10,8 @@ it opens after a number of won missions of the same side (option `final_mission_
 Other items:
 - **Progressive Starting Robo Funds**: +400 Robo Funds (the money for building robots during a mission) at the start
   of every mission, per copy (option `starting_robo_funds`)
-- **Money**: +$500 000 to spend in the engineer's shop between missions
+- **Money** ("$250 000 Money" up to "$2 000 000 Money", the name says how much): to spend in the engineer's shop between
+  missions
 - base enhancements and secret inventions from the shop, Alien Artifacts (artifact goals), traps (option
   `trap_percentage`)
 

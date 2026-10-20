@@ -41,8 +41,8 @@ DEV_HELP = (
     "    selected one if any); with \"all\" every robot of yours gets it at once",
     "    (god, nolose, funds and infmoney stay on until turned off, also when the game restarts)",
     "/dev give <item>: give yourself an item in the game only (part, booster, upgrade, invention, mission access,",
-    "    artifact); the server doesn't know about it. /dev give all: every part and booster. /dev give clear: take",
-    "    them back (they are also gone when the game restarts)",
+    "    artifact, Robo Funds); the server doesn't know about it. /dev give all: every part and booster.",
+    "    /dev give clear: take them back (closing the client does too)",
     "Building or buying with given items still sends their checks.",
 )
 
@@ -51,7 +51,7 @@ DEV_TOGGLES = {"god": "GOD", "nolose": "NOLOSE", "funds": "FUNDS", "infmoney": "
 
 
 def dev_givable() -> Dict[str, int]:
-    """Items /dev give can give: everything but filler (Shop Money is counted once per item) and traps."""
+    """Items /dev give can give: everything but filler (Money is counted once per item) and traps."""
     skip = set(data.FILLER.values()) | set(data.TRAPS.values())
     return {name: item_id for name, item_id in data.item_table().items() if name not in skip}
 
@@ -137,10 +137,12 @@ class RoboRumbleCommandProcessor(CommandProcessor):
             givable = dev_givable()
             if rest.lower() == "clear":
                 lines.append("DEV CLEAR")
+                ctx.dev_items.clear()
                 self.output("The items given with /dev give are gone again.")
             elif rest.lower() == "all":
                 parts = list(data.HEADS) + list(data.LEGS) + list(data.BOOSTERS)
                 lines += [f"DEV GIVE {givable[name]}" for name in parts]
+                ctx.dev_items += [givable[name] for name in parts]
                 self.output("Given: every weapon, legs and booster.")
             else:
                 name, usable, response = Utils.get_intended_text(rest, list(givable))
@@ -151,6 +153,7 @@ class RoboRumbleCommandProcessor(CommandProcessor):
                     self.output(response)
                     return
                 lines.append(f"DEV GIVE {givable[name]}")
+                ctx.dev_items.append(givable[name])
                 self.output(f"Given: {name}.")
         else:
             self.output(f"Unknown dev command {sub}. /dev help lists them.")
@@ -216,6 +219,7 @@ class RoboRumbleContext(Context):
         self.game_state: Optional[List[int]] = None
         self.shop_texts: Dict[int, Any] = {}   # shop slot -> (flags, "Item for Player")
         self.shop_hinted: Set[int] = set()
+        self.dev_items: List[int] = []         # items given with /dev give (the game counts them too)
         self.dev_toggles: Dict[str, bool] = {}   # /dev god etc., sent again when the game reconnects
 
     @staticmethod
@@ -328,13 +332,15 @@ class RoboRumbleContext(Context):
         return sum(1 for item in self.items_received if item.item == data.ARTIFACT_ID)
 
     def unlocked_missions(self, side: int) -> List[int]:
-        received = {item.item for item in self.items_received}
+        received = {item.item for item in self.items_received} | set(self.dev_items)
         wins = sum(1 for n in range(1, data.FINAL_MISSION) if data.mission_id(side, n) in self.checked_locations)
         start = int(self.slot_data.get("start_side", self.sides()[0]))
         unlocked = [n for n in range(1, data.FINAL_MISSION)
                     if (n == 1 and side == start) or data.mission_id(side, n) in received]
         goal = self.goal()
-        if (goal == 1 and wins >= int(self.slot_data.get("final_mission_wins", 10))) or                 (goal == 3 and self.artifacts() >= int(self.slot_data.get("alien_artifacts", 10))) or                 (goal in (0, 2) and data.mission_id(side, data.FINAL_MISSION) in received):
+        if ((goal == 1 and wins >= int(self.slot_data.get("final_mission_wins", 10)))
+                or (goal == 3 and self.artifacts() >= int(self.slot_data.get("alien_artifacts", 10)))
+                or (goal in (0, 2) and data.mission_id(side, data.FINAL_MISSION) in received)):
             unlocked.append(data.FINAL_MISSION)
         return unlocked
 
@@ -378,6 +384,9 @@ class RoboRumbleContext(Context):
         if self.world_settings("dev_mode", False):
             for name, on in self.dev_toggles.items():
                 await self.game_send(f"DEV SET {DEV_TOGGLES[name]} {int(on)}")
+            await self.game_send("DEV CLEAR")
+            for item_id in self.dev_items:
+                await self.game_send(f"DEV GIVE {item_id}")
         if goal == 2 and self.artifacts() >= artifacts:
             await self.game_send("GOAL")
         await self.send_checked()

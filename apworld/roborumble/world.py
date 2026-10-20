@@ -199,7 +199,7 @@ class RoboRumbleWorld(World):
         return RoboRumbleItem(name, classification, self.item_name_to_id[name], self.player)
 
     def get_filler_item_name(self) -> str:
-        return self.random.choice(list(data.FILLER.values()))
+        return self.random.choices(list(data.FILLER.values()), weights=data.MONEY_WEIGHTS)[0]
 
     def create_items(self) -> None:
         open_missions = self.options.open_missions.value

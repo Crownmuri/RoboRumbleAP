@@ -88,9 +88,21 @@ ARTIFACT = "Alien Artifact"
 ROBO_FUNDS = "Progressive Starting Robo Funds"   # +ROBO_FUNDS_STEP Robo Funds at the start of every mission, per copy
 ROBO_FUNDS_ID = FILLER_OFFSET + 1
 ROBO_FUNDS_STEP = 400
-FILLER: Dict[int, str] = {
-    FILLER_OFFSET + 2: "Money",                  # +$500 000 to spend in the shop between missions
+# Money for the shop between missions; the name says how much, like the game shows it ("$500 000")
+MONEY: Dict[int, int] = {
+    FILLER_OFFSET + 3: 250000,
+    FILLER_OFFSET + 2: 500000,
+    FILLER_OFFSET + 4: 1000000,
+    FILLER_OFFSET + 5: 2000000,
 }
+MONEY_WEIGHTS = (4, 4, 2, 1)   # in the order of MONEY: small amounts are more common
+
+
+def money_name(amount: int) -> str:
+    return f"${amount:,} Money".replace(",", " ")
+
+
+FILLER: Dict[int, str] = {item_id: money_name(amount) for item_id, amount in MONEY.items()}
 
 # Traps hit a random robot of the player during a mission (the patch keeps them until the next mission otherwise).
 TRAP_OFFSET = 5200
