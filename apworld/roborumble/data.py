@@ -10,7 +10,8 @@ table:
                      with side: both; mission 16 only with the goals final_mission_only and alien_artifacts_only,
                      it opens after a number of wins, option final_mission_wins)
     mission complete MISSION_OFFSET + 100 * side + mission number 1-16 (location)
-    combo build      COMBO_OFFSET + head index * 16 + legs index (location, option combo_builds)
+    combo build      COMBO_OFFSET + head index * 16 + legs index (location, option combo_builds; any two parts, since
+                     Unholy Alliance can put both sides' parts on one side)
     base upgrades    UPGRADE_OFFSET + index 0-7 (item; order of the engineer's menu)
     inventions       INVENTION_OFFSET + index 0-2 (item)
     shop purchases   SHOP_OFFSET + 50 * side + booster slot 0-8, + 100 + upgrade slot 0-7, + 200 + invention 0-2
@@ -83,9 +84,12 @@ INVENTIONS: Tuple[str, ...] = (
 )
 ARTIFACT = "Alien Artifact"
 
+# Robo Funds pay for robots during a mission; Money pays for the shop between missions.
+ROBO_FUNDS = "Progressive Starting Robo Funds"   # +ROBO_FUNDS_STEP Robo Funds at the start of every mission, per copy
+ROBO_FUNDS_ID = FILLER_OFFSET + 1
+ROBO_FUNDS_STEP = 400
 FILLER: Dict[int, str] = {
-    FILLER_OFFSET + 1: "Mission Funds Bonus",   # more starting funds in the next mission
-    FILLER_OFFSET + 2: "Shop Money",            # money to spend in the shop between missions
+    FILLER_OFFSET + 2: "Money",                  # +$500 000 to spend in the shop between missions
 }
 
 # Traps hit a random robot of the player during a mission (the patch keeps them until the next mission otherwise).
@@ -146,11 +150,11 @@ def final_goal(side: int) -> str:
 
 
 def build_head(name: str) -> str:
-    return f"{tag(HEADS.index(name) // 8)} Build {name}"
+    return f"Build {name}"
 
 
 def build_legs(name: str) -> str:
-    return f"{tag(LEGS.index(name) // 8)} Build {name}"
+    return f"Build {name}"
 
 
 def build_booster(name: str) -> str:
@@ -158,10 +162,11 @@ def build_booster(name: str) -> str:
 
 
 def build_combo(head: str, legs: str) -> str:
-    return f"{tag(HEADS.index(head) // 8)} Build {head} + {legs}"
+    return f"Build {head} + {legs}"
 
 
 def side_combos(side: int) -> List[str]:
+    """the combos of a side's own parts in the original game (with Unholy Alliance the world knows the sides' parts)"""
     return [build_combo(h, l) for h in side_heads(side) for l in side_legs(side)]
 
 
@@ -239,6 +244,7 @@ def item_table() -> Dict[str, int]:
     for i, name in enumerate(INVENTIONS):
         table[name] = INVENTION_OFFSET + i
     table[ARTIFACT] = ARTIFACT_ID
+    table[ROBO_FUNDS] = ROBO_FUNDS_ID
     for item_id, name in FILLER.items():
         table[name] = item_id
     for item_id, name in TRAPS.items():
@@ -259,8 +265,7 @@ def location_table() -> Dict[str, int]:
         table[build_booster(name)] = BOOSTER_OFFSET + i
     for h, head in enumerate(HEADS):
         for l, legs in enumerate(LEGS):
-            if h // 8 == l // 8:
-                table[build_combo(head, legs)] = COMBO_OFFSET + h * 16 + l
+            table[build_combo(head, legs)] = COMBO_OFFSET + h * 16 + l
     for side in (0, 1):
         for i in range(len(BOOSTERS)):
             table[shop_booster(side, i)] = SHOP_OFFSET + 50 * side + i

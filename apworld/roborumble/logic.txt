@@ -18,6 +18,11 @@
 #   damage weapon      any weapon of the side that does damage (not Oiler, Nitrogrenade or Disrupter)
 #   any weapon / any legs
 #   2 damage weapons   a number in front asks for that many different ones (works for all three shortcuts)
+#   2x Progressive Starting Robo Funds   "Nx" in front of an item asks for that many copies of it (each Robo
+#                      Funds item: +400 Robo Funds, the money for building robots, at the start of a mission)
+#
+# Unholy Alliance (option) can give a side the other side's parts: then a part named here that the side doesn't
+# get counts as "damage weapon", "any weapon" (Oiler, Nitrogrenade, Disrupter) or "any legs" instead.
 #
 # Red Star weapons: Chain Gun, Rocket Launcher, Homing Missile, Mine Spreader, Oiler, Magneton, Force Field, Nuke
 # Red Star legs:    2-Legs A, Heavy 4-Legs, Kangaroo, Caterpillar, 4-Tires, Amphibian, Propeller, Snail
@@ -29,6 +34,7 @@
 #                Stronger Energy Explosions, Wider Energy Explosions, Explosions Recharge Robos,
 #                Enemy Explosions Spare 1%
 # Inventions: Robo Intelligence Enhancer, Robo Spawn Protection, Robo Auto-Repair
+# Other: Progressive Starting Robo Funds
 
 
 # ======================================================================== RED STAR

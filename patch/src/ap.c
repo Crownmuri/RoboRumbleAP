@@ -32,6 +32,8 @@
 #define INVENTION_OFFSET 3200
 #define MISSION_OFFSET 4000
 #define FILLER_SHOP_MONEY 5002
+#define ROBO_FUNDS_ID 5001       /* Progressive Starting Robo Funds */
+#define ROBO_FUNDS_STEP 400
 #define COMBO_OFFSET 6000
 #define SHOP_OFFSET 7000
 #define SPY_OFFSET 7300
@@ -50,6 +52,11 @@ static volatile LONG g_goal_done;                 /* alien_artifacts_only: reach
 #define ARTIFACT_ID 5100   /* side mode 0 Red Star, 1 Terraflux, 2 both */
 static char g_seed[64];
 static int *g_items, g_nitems;
+/* Unholy Alliance (ROWS line): builder slot side * 8 + i -> weapon / legs type; the game's own tables come from
+   level1.ini [HeadsLegs] HeadA0-7, HeadB0-7, LegsA0-7, LegsB0-7 */
+static int g_row_heads[16] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+static int g_row_legs[16] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+static int *g_tbl_heads, *g_tbl_legs;
 static int *g_checked, g_nchecked;
 static int g_choose_mission, g_choose_side;   /* MISSION side n, mission 0 = none */
 static volatile LONG g_dirty;         /* items/checked changed */
@@ -177,10 +184,18 @@ static void apply(void)
     if (!side_played(side)) return;   /* a campaign of the other side: leave it alone */
     DWORD mode = g_gui_mode;
 
+    /* the parts in the builder's slots: the played side's slots as the slot data says, the other side's (the enemy's)
+       as in the original game */
+    if (g_tbl_heads && g_tbl_legs)
+        for (int i = 0; i < 16; i++) {
+            int mine = i / 8 == side;
+            g_tbl_heads[i] = mine ? g_row_heads[i] : i;
+            g_tbl_legs[i] = mine ? g_row_legs[i] : i;
+        }
     /* parts the robot builder offers */
     for (int i = 0; i < 8; i++) {
-        G->heads[i] = count_item(HEAD_OFFSET + side * 8 + i) ? '+' : '-';
-        G->legs[i] = count_item(LEGS_OFFSET + side * 8 + i) ? '+' : '-';
+        G->heads[i] = count_item(HEAD_OFFSET + g_row_heads[side * 8 + i]) ? '+' : '-';
+        G->legs[i] = count_item(LEGS_OFFSET + g_row_legs[side * 8 + i]) ? '+' : '-';
     }
     G->heads[8] = G->legs[8] = 0;
     for (int i = 0; i < 9; i++) G->boosters[i] = count_item(BOOSTER_OFFSET + i) ? '+' : '-';
@@ -293,6 +308,11 @@ int ap_goal_done(void) { return g_goal_done != 0; }
 void traps_install(int *local_player);
 void traps_tick(void);
 void traps_dev_fire(int trap);
+void dev_install(int *local_player);
+void dev_tick(void);
+void dev_set(const char *what, int on);
+void dev_alien(int type, int all);
+void rr_add_robo_funds(int amount);
 int ap_item_count(int id)
 {
     EnterCriticalSection(&g_cs);
@@ -429,12 +449,16 @@ static void on_mode(DWORD mode)
         }
         if (mode == RR_MODE_LOADLEVEL) g_choose_mission = 0;
     }
+    int add_funds = 0;
     if (mode == RR_MODE_GAMEPLAY && !g_mission_running) {
         g_mission_running = *level + 1;
         g_choose_mission = 0;   /* the pick is used up: after a win the game's own next mission stands */
+        add_funds = count_item(ROBO_FUNDS_ID) * ROBO_FUNDS_STEP;
     }
     int side_now = campaign_side();
     LeaveCriticalSection(&g_cs);
+    /* Progressive Starting Robo Funds: the level's setup has given the mission's funds by now */
+    if (add_funds) rr_add_robo_funds(add_funds);
     if (won) {
         rr_log("ap: mission %d of side %d won", won, side_now);
         check(mission_id(side_now, won));
@@ -589,6 +613,7 @@ static void tick(void)
     }
     apdlg_tick();
     traps_tick();
+    dev_tick();
     show_messages();
 }
 
@@ -707,6 +732,21 @@ static void handle(char *line)
         g_have_slot = 1;
         LeaveCriticalSection(&g_cs);
         rr_log("ap: slot side %d, final mission after %d wins, seed %s", side, final_wins, seed);
+    } else if (!strncmp(line, "ROWS ", 5)) {
+        int v[32], n = 0, used = 0;
+        const char *q = line + 5;
+        while (n < 32 && sscanf(q, "%d%n", &v[n], &used) == 1) { q += used; n++; }
+        int ok = n == 32;
+        for (int i = 0; i < 32 && ok; i++) ok = v[i] >= 0 && v[i] < 16;
+        if (ok) {
+            EnterCriticalSection(&g_cs);
+            memcpy(g_row_heads, v, sizeof g_row_heads);
+            memcpy(g_row_legs, v + 16, sizeof g_row_legs);
+            LeaveCriticalSection(&g_cs);
+            int mixed = 0;
+            for (int i = 0; i < 16; i++) mixed |= v[i] != i || v[16 + i] != i;
+            rr_log("ap: builder slots %s", mixed ? "mixed (Unholy Alliance)" : "as in the original game");
+        }
     } else if (!strncmp(line, "ITEMS", 5)) {
         int n, *v = parse_ids(line + 5, &n);
         EnterCriticalSection(&g_cs);
@@ -742,7 +782,8 @@ static void handle(char *line)
             LeaveCriticalSection(&g_cs);
         }
     } else if (!strncmp(line, "DEV ", 4)) {
-        /* DEV GIVE id | DEV CLEAR | DEV TRAP t | DEV WIN | DEV LOSE | DEV MONEY n | DEV ADDMONEY n */
+        /* DEV GIVE id | DEV CLEAR | DEV TRAP t | DEV WIN | DEV LOSE | DEV MONEY n | DEV ADDMONEY n |
+           DEV SET GOD|NOLOSE|FUNDS|INFMONEY 0/1 | DEV ALIEN type [ALL] */
         const char *a = line + 4;
         int v = 0;
         if (sscanf(a, "GIVE %d", &v) == 1) {
@@ -761,6 +802,11 @@ static void handle(char *line)
             InterlockedExchange(&g_dev_end, 1);
         } else if (!strcmp(a, "LOSE")) {
             InterlockedExchange(&g_dev_end, 2);
+        } else if (!strncmp(a, "SET ", 4)) {
+            char what[16] = "";
+            if (sscanf(a + 4, "%15s %d", what, &v) == 2) dev_set(what, v);
+        } else if (sscanf(a, "ALIEN %d", &v) == 1) {
+            dev_alien(v, strstr(a, " ALL") != NULL);
         } else if (sscanf(a, "MONEY %d", &v) == 1) {
             g_dev_money = v; InterlockedExchange(&g_dev_money_op, 1);
         } else if (sscanf(a, "ADDMONEY %d", &v) == 1) {
@@ -837,6 +883,35 @@ static DWORD WINAPI net_thread(LPVOID unused)
     }
 }
 
+/* The loader of level1.ini [HeadsLegs]: mov edi,"HeadA%d"; ...; mov [ebx*4+table],eax. The B row follows the A row. */
+static int *find_row_table(const char *key)
+{
+    BYTE *base = (BYTE *)GetModuleHandleA(NULL);
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(nt);
+    size_t klen = strlen(key) + 1;
+    BYTE *str = NULL;
+    for (int i = 0; i < nt->FileHeader.NumberOfSections && !str; i++, sec++) {
+        if (sec->Characteristics & IMAGE_SCN_MEM_EXECUTE) continue;
+        BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - klen;
+        for (; p < end; p++) if (!memcmp(p, key, klen)) { str = p; break; }
+    }
+    if (!str) return NULL;
+    BYTE pat[5] = { 0xBF };
+    memcpy(pat + 1, &str, 4);
+    sec = IMAGE_FIRST_SECTION(nt);
+    for (int i = 0; i < nt->FileHeader.NumberOfSections; i++, sec++) {
+        if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        BYTE *p = base + sec->VirtualAddress, *end = p + sec->Misc.VirtualSize - 64;
+        for (; p < end; p++) {
+            if (memcmp(p, pat, 5)) continue;
+            for (int k = 5; k < 56; k++)
+                if (p[k] == 0x89 && p[k + 1] == 0x04 && p[k + 2] == 0x9D) return *(int **)(p + k + 3);
+        }
+    }
+    return NULL;
+}
+
 void ap_install(void)
 {
     g_enabled = GetPrivateProfileIntA("ap", "enabled", 0, g_ini_path);
@@ -847,6 +922,10 @@ void ap_install(void)
     if (!rr_watch_modes()) { rr_log("ap: game mode switch not found, Archipelago off"); return; }
     InitializeCriticalSection(&g_cs);
     rr_on_mode(on_mode);
+    g_tbl_heads = find_row_table("HeadA%d");
+    g_tbl_legs = find_row_table("LegsA%d");
+    if (!g_tbl_heads || !g_tbl_legs) { g_tbl_heads = g_tbl_legs = NULL; rr_log("ap: builder slot tables not found, no Unholy Alliance"); }
+    else rr_log("ap: builder slot tables %p %p", (void *)g_tbl_heads, (void *)g_tbl_legs);
 
     BYTE *order = rr_find_unique((const BYTE *)"\x56\x55\x53\x83\xec\x10\x33\xc0\x8b\xea\x8b\xf1\x89\x04\x24\xe8", 16);
     if (order) {
@@ -872,6 +951,7 @@ void ap_install(void)
     if (built) {
         g_produced_counter = *(DWORD **)(built + 2);
         traps_install(*(int **)(built - 14));   /* cmp ebp,[local player] before it */
+        dev_install(*(int **)(built - 14));
         g_built_resume = built + 6;
         rr_write_jmp(built, (void *)built_stub, 6);
     } else rr_log("ap: robot spawn code not found, no build checks");

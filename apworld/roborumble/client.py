@@ -32,12 +32,22 @@ DEFAULT_PORT = 38480
 DEV_HELP = (
     "/dev trap <oil|freeze|disruptor|mine|nuke>: set off a trap on one of your robots",
     "/dev win, /dev lose: end the mission you are playing",
-    "/dev money <amount>: set your shop money; /dev money +<amount> adds to it",
+    "/dev money <amount>: set your Money for the shop; /dev money +<amount> adds to it",
+    "/dev god [on|off]: your robots take no damage and can't be frozen, your base keeps its energy",
+    "/dev nolose [on|off]: missions can't be lost (also the hidden rules like \"lose 3 robos\")",
+    "/dev funds [on|off]: endless Robo Funds in missions (for building robots)",
+    "/dev infmoney [on|off]: endless Money for the shop",
+    "/dev alien <speed|defense|weapon|intelligence> [all]: drop an alien booster next to one of your robots (a",
+    "    selected one if any); with \"all\" every robot of yours gets it at once",
+    "    (god, nolose, funds and infmoney stay on until turned off, also when the game restarts)",
     "/dev give <item>: give yourself an item in the game only (part, booster, upgrade, invention, mission access,",
     "    artifact); the server doesn't know about it. /dev give all: every part and booster. /dev give clear: take",
     "    them back (they are also gone when the game restarts)",
     "Building or buying with given items still sends their checks.",
 )
+
+
+DEV_TOGGLES = {"god": "GOD", "nolose": "NOLOSE", "funds": "FUNDS", "infmoney": "INFMONEY"}
 
 
 def dev_givable() -> Dict[str, int]:
@@ -89,7 +99,23 @@ class RoboRumbleCommandProcessor(CommandProcessor):
             self.output("The game is not connected.")
             return
         lines: List[str] = []
-        if sub == "trap":
+        if sub in DEV_TOGGLES:
+            value = rest.lower()
+            on = not ctx.dev_toggles.get(sub, False) if value == "" else value in ("on", "1", "true", "yes")
+            ctx.dev_toggles[sub] = on
+            lines.append(f"DEV SET {DEV_TOGGLES[sub]} {int(on)}")
+            self.output(f"{sub}: {'on' if on else 'off'}")
+        elif sub == "alien":
+            kinds = ("speed", "defense", "weapon", "intelligence")
+            words = rest.lower().split()
+            if not words or words[0] not in kinds:
+                self.output("Usage: /dev alien <speed|defense|weapon|intelligence> [all]")
+                return
+            every = len(words) > 1 and words[1] == "all"
+            lines.append(f"DEV ALIEN {kinds.index(words[0]) + 1}" + (" ALL" if every else ""))
+            self.output(f"Alien {words[0].capitalize()} Booster: " +
+                        ("given to all your robots." if every else "dropped next to one of your robots."))
+        elif sub == "trap":
             names = [name.split()[0].lower() for name in data.TRAPS.values()]
             if rest.lower() not in names:
                 self.output("Usage: /dev trap <" + "|".join(names) + ">")
@@ -190,6 +216,7 @@ class RoboRumbleContext(Context):
         self.game_state: Optional[List[int]] = None
         self.shop_texts: Dict[int, Any] = {}   # shop slot -> (flags, "Item for Player")
         self.shop_hinted: Set[int] = set()
+        self.dev_toggles: Dict[str, bool] = {}   # /dev god etc., sent again when the game reconnects
 
     @staticmethod
     def world_settings(key: str, default: Any) -> Any:
@@ -346,6 +373,11 @@ class RoboRumbleContext(Context):
         goal = self.goal()
         artifacts = int(self.slot_data.get("alien_artifacts", 10))
         await self.game_send(f"SLOT {side} {final_wins} {start_side} {seed} {goal} {artifacts}")
+        rows = list(self.slot_data.get("rows_heads", range(16))) + list(self.slot_data.get("rows_legs", range(16)))
+        await self.game_send("ROWS " + " ".join(str(int(v)) for v in rows))
+        if self.world_settings("dev_mode", False):
+            for name, on in self.dev_toggles.items():
+                await self.game_send(f"DEV SET {DEV_TOGGLES[name]} {int(on)}")
         if goal == 2 and self.artifacts() >= artifacts:
             await self.game_send("GOAL")
         await self.send_checked()

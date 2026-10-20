@@ -11,6 +11,7 @@ from .options import RoboRumbleOptions
 SLOT_DATA_OPTIONS = (
     "side", "starting_side", "starting_parts", "starting_weapons", "goal", "open_missions", "final_mission_wins", "logic_strictness", "booster_builds",
     "combo_builds", "shop_checks", "spy_checks", "bonus_checks", "alien_artifacts", "extra_artifacts", "trap_percentage", "death_link",
+    "unholy_alliance", "starting_robo_funds",
 )
 
 VICTORY = "Victory"
@@ -92,7 +93,7 @@ class RoboRumbleWorld(World):
         "Terraflux Missions": set(_all_missions(1)),
         "Builds": {data.build_head(n) for n in data.HEADS} | {data.build_legs(n) for n in data.LEGS},
         "Booster Builds": {data.build_booster(n) for n in data.BOOSTERS},
-        "Combo Builds": set(data.side_combos(0) + data.side_combos(1)),
+        "Combo Builds": {data.build_combo(h, l) for h in data.HEADS for l in data.LEGS},
         "Report Bonuses": {data.bonus(s, n, k) for s in (0, 1) for n in range(1, data.BONUS_MISSIONS + 1)
                            for k in range(len(data.BONUS_KINDS))},
         "Shop": set(data.shop_locations(0) + data.shop_locations(1)),
@@ -104,18 +105,57 @@ class RoboRumbleWorld(World):
     sides: List[int]
     start_heads: List[str]
     start_legs: List[str]
+    rows_heads: List[int]   # Unholy Alliance: builder slot (side * 8 + i) -> weapon index (identity when off)
+    rows_legs: List[int]
+
+    def side_heads(self, side: int) -> List[str]:
+        """the weapons this side builds (Unholy Alliance can give it the other side's)"""
+        return [data.HEADS[t] for t in self.rows_heads[side * 8:side * 8 + 8]]
+
+    def side_legs(self, side: int) -> List[str]:
+        return [data.LEGS[t] for t in self.rows_legs[side * 8:side * 8 + 8]]
+
+    def side_attack_heads(self, side: int) -> List[str]:
+        return [h for h in self.side_heads(side) if h not in data.SUPPORT_HEADS]
+
+    def make_rows(self) -> None:
+        heads, legs = list(range(16)), list(range(16))
+        mode = self.options.unholy_alliance
+        for row in (heads, legs):
+            if mode == "switch":
+                for i in range(8):
+                    if self.random.random() < 0.5:
+                        row[i], row[i + 8] = row[i + 8], row[i]
+            elif mode == "full_shuffle":
+                self.random.shuffle(row)
+                row[:8], row[8:] = sorted(row[:8]), sorted(row[8:])
+        self.rows_heads, self.rows_legs = heads, legs
+
+    def pools(self, side: int) -> Dict[str, List[str]]:
+        return {"weapon": self.side_heads(side), "damage weapon": self.side_attack_heads(side),
+                "legs": self.side_legs(side)}
 
     def generate_early(self) -> None:
-        self.mission_logic = logic.load()
-        # what logic asks for has to be progression (upgrades and inventions are only useful otherwise)
-        relaxed = self.options.logic_strictness == "relaxed"
-        self.logic_items = {term for rules in self.mission_logic.values()
-                            for need in (rules.need if relaxed else rules.need + rules.recommended)
-                            for option in need for term in option if isinstance(term, str)}
         passthrough: Dict[str, Any] = getattr(self.multiworld, "re_gen_passthrough", {}).get(self.game, {})
         for option_name in SLOT_DATA_OPTIONS:
             if option_name in passthrough:
                 getattr(self.options, option_name).value = passthrough[option_name]
+        if passthrough and "rows_heads" in passthrough:
+            self.rows_heads, self.rows_legs = list(passthrough["rows_heads"]), list(passthrough["rows_legs"])
+        else:
+            self.make_rows()
+
+        # logic.txt names the original parts: a part this side doesn't get asks for one of its kind instead
+        self.mission_logic = logic.load()
+        for (side, _), rules in self.mission_logic.items():
+            buildable = self.side_heads(side) + self.side_legs(side)
+            rules.need = [logic.translate(r, buildable) for r in rules.need]
+            rules.recommended = [logic.translate(r, buildable) for r in rules.recommended]
+        # what logic asks for has to be progression (upgrades and inventions are only useful otherwise)
+        relaxed = self.options.logic_strictness == "relaxed"
+        self.logic_items = {name for rules in self.mission_logic.values()
+                            for need in (rules.need if relaxed else rules.need + rules.recommended)
+                            for option in need for name, _ in option if name not in logic.KINDS}
 
         self.sides = [0, 1] if self.options.side == "both" else [self.options.side.value]
         # the side whose first mission is open; with both sides the other one's needs its access item
@@ -125,15 +165,19 @@ class RoboRumbleWorld(World):
             self.start_legs = list(passthrough["start_legs"])
             return
         self.start_heads, self.start_legs = [], []
+        random_weapons = self.options.starting_parts in ("random_weapons", "random_all")
         for side in self.sides:
-            heads, legs = data.starting_parts(side)
-            if self.options.starting_parts in ("random_weapons", "random_all"):
+            # the original first mission's builder slots (with Unholy Alliance: whatever is in those slots now)
+            heads = [self.side_heads(side)[i] for i, c in enumerate(data.VANILLA_HEADS[side][0]) if c == "+"]
+            legs = [self.side_legs(side)[i] for i, c in enumerate(data.VANILLA_LEGS[side][0]) if c == "+"]
+            if random_weapons or not any(h in self.side_attack_heads(side) for h in heads):
                 # one weapon that does damage, the rest anything
-                first = self.random.choice(data.side_attack_heads(side))
-                rest = [h for h in data.side_heads(side) if h != first]
-                heads = [first] + self.random.sample(rest, self.options.starting_weapons.value - 1)
+                first = self.random.choice(self.side_attack_heads(side))
+                rest = [h for h in self.side_heads(side) if h != first]
+                count = self.options.starting_weapons.value if random_weapons else len(heads)
+                heads = [first] + self.random.sample(rest, count - 1)
             if self.options.starting_parts in ("random_legs", "random_all"):
-                legs = [self.random.choice(data.side_legs(side))]
+                legs = [self.random.choice(self.side_legs(side))]
             self.start_heads += heads
             self.start_legs += legs
 
@@ -141,6 +185,9 @@ class RoboRumbleWorld(World):
     def create_item(self, name: str) -> RoboRumbleItem:
         if name in data.FILLER.values():
             classification = ItemClassification.filler
+        elif name == data.ROBO_FUNDS:
+            classification = (ItemClassification.progression if name in getattr(self, "logic_items", ())
+                              else ItemClassification.useful)
         elif name in data.TRAPS.values():
             classification = ItemClassification.trap
         elif (name in data.UPGRADES or name in data.INVENTIONS) and name not in getattr(self, "logic_items", ()):
@@ -171,11 +218,12 @@ class RoboRumbleWorld(World):
                     self.multiworld.push_precollected(item)
                 else:
                     pool.append(item)
-            for name in data.side_heads(side) + data.side_legs(side):
+            for name in self.side_heads(side) + self.side_legs(side):
                 if name not in self.start_heads and name not in self.start_legs:
                     pool.append(self.create_item(name))
         for name in data.BOOSTERS + data.UPGRADES + data.INVENTIONS:
             pool.append(self.create_item(name))
+        pool += [self.create_item(data.ROBO_FUNDS) for _ in range(self.options.starting_robo_funds.value)]
         if self.artifact_goal():
             artifacts = self.options.alien_artifacts.value + self.options.extra_artifacts.value
             pool += [self.create_item(data.ARTIFACT) for _ in range(artifacts)]
@@ -210,10 +258,10 @@ class RoboRumbleWorld(World):
         names: List[str] = []
         for side in self.sides:
             names += _all_missions(side)
-            names += [data.build_head(n) for n in data.side_heads(side)]
-            names += [data.build_legs(n) for n in data.side_legs(side)]
+            names += [data.build_head(n) for n in self.side_heads(side)]
+            names += [data.build_legs(n) for n in self.side_legs(side)]
             if self.options.combo_builds:
-                names += data.side_combos(side)
+                names += [data.build_combo(h, l) for h in self.side_heads(side) for l in self.side_legs(side)]
             if self.options.spy_checks:
                 names += [data.spy_hint(side, n) for n in range(1, data.MISSIONS + 1)]
             if self.options.bonus_checks:
@@ -258,7 +306,8 @@ class RoboRumbleWorld(World):
         if rules is None:
             return True
         needs = rules.need if self.options.logic_strictness == "relaxed" else rules.need + rules.recommended
-        return all(logic.met(state, self.player, side, need) for need in needs)
+        pools = self.pools(side)
+        return all(logic.met(state, self.player, need, pools) for need in needs)
 
     def has_base(self, side: int, mission: int) -> bool:
         rules = self.mission_logic.get((side, mission))
@@ -305,15 +354,15 @@ class RoboRumbleWorld(World):
                     for kind in range(len(data.BONUS_KINDS)):
                         self.get_location(data.bonus(side, number, kind)).access_rule = (
                             lambda state, s=side, n=number: self.can_play(state, s, n))
-            for name in data.side_heads(side):
+            for name in self.side_heads(side):
                 self.get_location(data.build_head(name)).access_rule = (
                     lambda state, n=name, s=side: state.has(n, player) and self.side_reachable(state, s))
-            for name in data.side_legs(side):
+            for name in self.side_legs(side):
                 self.get_location(data.build_legs(name)).access_rule = (
                     lambda state, n=name, s=side: state.has(n, player) and self.side_reachable(state, s))
             if self.options.combo_builds:
-                for head in data.side_heads(side):
-                    for legs in data.side_legs(side):
+                for head in self.side_heads(side):
+                    for legs in self.side_legs(side):
                         self.get_location(data.build_combo(head, legs)).access_rule = (
                             lambda state, h=head, l=legs, s=side: state.has_all((h, l), player)
                             and self.side_reachable(state, s))
@@ -332,6 +381,8 @@ class RoboRumbleWorld(World):
         slot["start_side"] = self.start_side
         slot["start_heads"] = self.start_heads
         slot["start_legs"] = self.start_legs
+        slot["rows_heads"] = self.rows_heads
+        slot["rows_legs"] = self.rows_legs
         return slot
 
     @staticmethod

@@ -211,12 +211,43 @@ class NukeTrapWeight(Range):
     default = 1
 
 
+class UnholyAlliance(Choice):
+    """
+    Mixes the two sides' weapons and legs. Each side still builds eight weapons and eight legs, but they can come
+    from both sides (a Red Star robot with a Laser on Spider Legs). Enemies keep their original parts.
+    off: the original parts.
+    switch: each slot of the robot builder may swap its part with the same slot of the other side (Chain Gun or
+    Laser in the first slot, Rocket Launcher or Pulse Gun in the second, ...).
+    full_shuffle: the 16 weapons and the 16 legs are split between the sides at random.
+    Missions that ask for a part the side doesn't get ask for any part of that kind instead (logic.txt).
+    """
+    display_name = "Unholy Alliance"
+    option_off = 0
+    option_switch = 1
+    option_full_shuffle = 2
+    default = 0
+
+
+class StartingRoboFunds(Range):
+    """
+    How many Progressive Starting Robo Funds are in the pool. Each one adds 400 Robo Funds (the money for building
+    robots during a mission; about one more robot) at the start of every mission. Money for the shop between missions
+    is a different item.
+    """
+    display_name = "Progressive Starting Robo Funds"
+    range_start = 0
+    range_end = 10
+    default = 3
+
+
 @dataclass
 class RoboRumbleOptions(PerGameCommonOptions):
     side: Side
     starting_side: StartingSide
     starting_parts: StartingParts
     starting_weapons: StartingWeapons
+    unholy_alliance: UnholyAlliance
+    starting_robo_funds: StartingRoboFunds
     goal: Goal
     open_missions: OpenMissions
     final_mission_wins: FinalMissionWins
