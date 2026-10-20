@@ -95,7 +95,7 @@ TRAPS: Dict[int, str] = {
     TRAP_OFFSET + 1: "Freeze Trap",      # frozen like a Nitrogrenade hit
     TRAP_OFFSET + 2: "Disruptor Trap",   # malfunctions like a Disrupter hit
     TRAP_OFFSET + 3: "Mine Trap",        # destroyed after 30 seconds
-    TRAP_OFFSET + 4: "Nuke Trap",        # an enemy Nuke goes off at the robot
+    TRAP_OFFSET + 4: "Nuke Trap",        # the robot goes off like a Nuke robot (own nuke)
 }
 
 # What each campaign mission lets you build in the original game ('+' = available), per side, taken from the

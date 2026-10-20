@@ -203,7 +203,8 @@ class MineTrapWeight(Range):
 
 
 class NukeTrapWeight(Range):
-    """How likely a trap is a Nuke Trap: an enemy Nuke goes off at one of your robots."""
+    """How likely a trap is a Nuke Trap: one of your robots goes off like a Nuke robot. Your own nuke: it spares
+    your other robots but hurts enemy robots and any base in range, yours too."""
     display_name = "Nuke Trap Weight"
     range_start = 0
     range_end = 10

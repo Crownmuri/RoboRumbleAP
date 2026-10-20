@@ -5,7 +5,8 @@
    Freeze Trap      the robot is frozen like a Nitrogrenade hit (robot +0x3A0 = freeze_timeout)
    Disruptor Trap   the robot malfunctions like a Disrupter hit (robot +0x2C = initial_malfunction_timeout)
    Mine Trap        a mine is stuck to the robot: it is destroyed after 30 seconds
-   Nuke Trap        a Nuke goes off at the robot (an enemy's nuke: it hurts the player's robots around it)
+   Nuke Trap        the robot goes off like a Nuke robot: the player's own nuke, so it is destroyed and the blast
+                    hits enemy robots and every base in range (the player's too), but spares the player's other robots
 
    How many of each trap were already set off is kept per seed in rrpatch_ap.ini, so reconnecting or loading a save
    doesn't set them off again; traps received outside a mission wait for the next one.
@@ -117,7 +118,7 @@ static int fire(int trap)
         for (int i = 0; i < 16; i++)
             if (!g_mines[i].robot) { g_mines[i].robot = r; g_mines[i].at = GetTickCount() + 30000; break; }
         break;
-    case 4: g_nuke(enemy_player(), pos, 0); break;
+    case 4: g_nuke(*g_local_player, pos, 0); destroy(r); break;
     }
     rr_log("trap: %s at %.0f,%.0f", k_trap_names[trap], pos[0], pos[1]);
     return 1;
