@@ -40,6 +40,8 @@ static int g_ready;
 
 static volatile LONG g_god, g_nolose, g_funds, g_money;
 static volatile LONG g_alien_pending[5], g_alien_all[5];
+static volatile LONG g_alien_item[5];   /* Alien Booster items the player drops (client /alien): reported when done */
+void ap_alien_used(int type);
 
 /* ---------------------------------------------------------------- no loss */
 DWORD *g_dev_winflag;
@@ -111,13 +113,19 @@ void dev_install(int *local_player)
            (void *)g_tiles, g_lose_target);
 }
 
+void rr_money_restore(void);
+int rr_dev_infmoney(void) { return g_money != 0; }
+
 /* ---------------------------------------------------------------- requests (any thread) */
 void dev_set(const char *what, int on)
 {
     if (!strcmp(what, "GOD")) InterlockedExchange(&g_god, on);
     else if (!strcmp(what, "NOLOSE")) InterlockedExchange(&g_nolose, on);
     else if (!strcmp(what, "FUNDS")) InterlockedExchange(&g_funds, on);
-    else if (!strcmp(what, "INFMONEY")) InterlockedExchange(&g_money, on);
+    else if (!strcmp(what, "INFMONEY")) {
+        /* endless Money isn't kept: when it goes off, the Money from before comes back */
+        if (InterlockedExchange(&g_money, on) && !on) rr_money_restore();
+    }
     rr_log("dev: %s %s", what, on ? "on" : "off");
 }
 
@@ -126,6 +134,12 @@ void dev_alien(int type, int all)
 {
     if (type < 1 || type > 4) return;
     InterlockedIncrement(all ? &g_alien_all[type] : &g_alien_pending[type]);
+}
+
+/* an Alien Booster item (any thread): dropped next to a robot of the player as soon as there is one */
+void rr_alien_item(int type)
+{
+    if (type >= 1 && type <= 4) InterlockedIncrement(&g_alien_item[type]);
 }
 
 /* ---------------------------------------------------------------- game thread */
@@ -245,5 +259,6 @@ void dev_tick(void)
     for (int t = 1; t <= 4; t++) {
         if (g_alien_all[t] > 0) { InterlockedDecrement(&g_alien_all[t]); give_alien(t); }
         if (g_alien_pending[t] > 0 && drop_alien(t)) InterlockedDecrement(&g_alien_pending[t]);
+        if (g_alien_item[t] > 0 && drop_alien(t)) { InterlockedDecrement(&g_alien_item[t]); ap_alien_used(t); }
     }
 }

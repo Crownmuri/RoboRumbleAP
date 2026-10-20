@@ -11,7 +11,7 @@ from .options import RoboRumbleOptions
 SLOT_DATA_OPTIONS = (
     "side", "starting_side", "starting_parts", "starting_weapons", "goal", "open_missions", "final_mission_wins", "logic_strictness", "booster_builds",
     "combo_builds", "shop_checks", "spy_checks", "bonus_checks", "alien_artifacts", "extra_artifacts", "trap_percentage", "death_link",
-    "unholy_alliance", "starting_robo_funds",
+    "unholy_alliance", "starting_robo_funds", "alien_booster_percentage",
 )
 
 VICTORY = "Victory"
@@ -85,6 +85,8 @@ class RoboRumbleWorld(World):
         "Base Upgrades": set(data.UPGRADES),
         "Inventions": set(data.INVENTIONS),
         "Traps": set(data.TRAPS.values()),
+        "Alien Boosters": set(data.ALIEN_BOOSTERS.values()),
+        "Money": set(data.FILLER.values()),
         "Red Star Mission Access": {data.mission_access(0, n) for n in range(1, data.FINAL_MISSION + 1)},
         "Terraflux Mission Access": {data.mission_access(1, n) for n in range(1, data.FINAL_MISSION + 1)},
     }
@@ -185,6 +187,8 @@ class RoboRumbleWorld(World):
     def create_item(self, name: str) -> RoboRumbleItem:
         if name in data.FILLER.values():
             classification = ItemClassification.filler
+        elif name in data.ALIEN_BOOSTERS.values():
+            classification = ItemClassification.useful
         elif name == data.ROBO_FUNDS:
             classification = (ItemClassification.progression if name in getattr(self, "logic_items", ())
                               else ItemClassification.useful)
@@ -245,7 +249,10 @@ class RoboRumbleWorld(World):
         if traps:
             names = self.random.choices(list(data.TRAPS.values()), weights=weights, k=traps)
             pool += [self.create_item(name) for name in names]
-        pool += [self.create_item(self.get_filler_item_name()) for _ in range(missing - traps)]
+        rest = missing - traps
+        aliens = round(max(rest, 0) * self.options.alien_booster_percentage.value / 100)
+        pool += [self.create_item(self.random.choice(list(data.ALIEN_BOOSTERS.values()))) for _ in range(aliens)]
+        pool += [self.create_item(self.get_filler_item_name()) for _ in range(rest - aliens)]
         self.multiworld.itempool += pool
 
     # ---------------------------------------------------------------- locations

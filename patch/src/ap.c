@@ -169,7 +169,14 @@ static int campaign_side(void) { return *(int *)G->state == 1 ? 1 : 0; }
 /* ---------------------------------------------------------------- applying the slot to the game */
 static BYTE g_shop_written[SHOP_SLOTS];   /* owned[] as last written in the briefing */
 static int g_shop_view;                   /* 1 = owned[] currently means "checked" (briefing) */
-static int g_money_applied = -1;
+static int g_money_known;              /* MONEYSTATE came from the client */
+static int g_money_store = -1;          /* the campaign's Money as the server has it (-1 = none yet) */
+static int g_money_items = -1;          /* Money items added so far (-1 = none yet) */
+static int g_money_sent_items = -1;
+static volatile LONG g_money_restore = 1;   /* a save was loaded / a campaign started: the server's Money goes back in */
+int rr_dev_infmoney(void);
+static void money_tick(BYTE *S, DWORD mode);
+void rr_money_restore(void) { InterlockedExchange(&g_money_restore, 1); }
 
 static char *state_path(char *buf, size_t n)
 {
@@ -224,22 +231,42 @@ static void apply(void)
         g_shop_view = 0;
     }
 
-    /* Money items ("$500 000 Money"): added once each; the total added so far is kept per seed (older versions kept
-       the number of $500 000 items as shop_money_applied) */
-    int money = 0;
-    for (int i = 0; i < (int)(sizeof k_money / sizeof k_money[0]); i++) money += count_item(k_money[i].id) * k_money[i].amount;
-    if (g_money_applied < 0) {
+    money_tick(S, mode);
+}
+
+/* Money lives on the Archipelago server (data storage, via the client's MONEYSTATE / our MONEY lines), not in the
+   game's saves: a loaded save or a new campaign gets the server's amount back, so Money received or earned after the
+   last save isn't lost when the game closes without saving. Money items ("$500 000 Money") are added once each; the
+   total added is kept on the server too. */
+static void money_tick(BYTE *S, DWORD mode)
+{
+    if (!g_money_known || rr_dev_infmoney()) return;
+    int *cash = (int *)(S + 8);
+    if (g_money_restore && (mode == RR_MODE_BRIEFING || mode == RR_MODE_GAMEPLAY)) {
+        g_money_restore = 0;
+        if (g_money_store >= 0 && *cash != g_money_store) {
+            rr_log("ap: Money %d -> %d (the server's)", *cash, g_money_store);
+            *cash = g_money_store;
+        }
+    }
+    if (g_money_restore) return;   /* a save is still loading */
+    if (g_money_items < 0) {
+        /* nothing on the server yet: an older version kept the items' total in rrpatch_ap.ini */
         char p[MAX_PATH];
         state_path(p, sizeof p);
-        g_money_applied = GetPrivateProfileIntA(g_seed, "money_applied", -1, p);
-        if (g_money_applied < 0) g_money_applied = GetPrivateProfileIntA(g_seed, "shop_money_applied", 0, p) * 500000;
+        g_money_items = GetPrivateProfileIntA(g_seed, "money_applied", -1, p);
+        if (g_money_items < 0) g_money_items = GetPrivateProfileIntA(g_seed, "shop_money_applied", 0, p) * 500000;
     }
-    if (money > g_money_applied) {
-        *(int *)(S + 8) += money - g_money_applied;
-        g_money_applied = money;
-        char p[MAX_PATH], v[16];
-        snprintf(v, sizeof v, "%d", money);
-        WritePrivateProfileStringA(g_seed, "money_applied", v, state_path(p, sizeof p));
+    int items = 0;
+    for (int i = 0; i < (int)(sizeof k_money / sizeof k_money[0]); i++) items += count_item(k_money[i].id) * k_money[i].amount;
+    if (items > g_money_items) {
+        *cash += items - g_money_items;
+        g_money_items = items;
+    }
+    if (*cash != g_money_store || items != g_money_sent_items) {
+        g_money_store = *cash;
+        g_money_sent_items = g_money_items;
+        send_line("MONEY %d %d", g_money_store, g_money_items);
     }
 }
 
@@ -317,6 +344,8 @@ void dev_tick(void);
 void dev_set(const char *what, int on);
 void dev_alien(int type, int all);
 void rr_add_robo_funds(int amount);
+void rr_alien_item(int type);
+void ap_alien_used(int type) { send_line("ALIENUSED %d", type); }
 int ap_item_count(int id)
 {
     EnterCriticalSection(&g_cs);
@@ -414,6 +443,7 @@ static void on_mode(DWORD mode)
         *g_preset_side = g_have_slot ? side + 1 : g_preset_orig;
         if (g_have_slot) rr_log("ap: new campaign on side %d, faction screen skipped", side);
     }
+    if (mode == 13 /* LOADGAME */ || mode == 9 /* new campaign */) rr_money_restore();
     if (!G || !g_have_slot) return;
     /* the remembered side was cleared for the fresh seed's intro; once in the campaign it is that of the campaign
        again, so the next boot doesn't play the intro a second time */
@@ -729,13 +759,28 @@ static void handle(char *line)
         char seed[64] = "";
         sscanf(line + 5, "%d %d %d %63s %d %d", &side, &final_wins, &start, seed, &goal, &artifacts);
         EnterCriticalSection(&g_cs);
-        if (strcmp(seed, g_seed)) g_money_applied = -1;
+        if (strcmp(seed, g_seed)) { g_money_known = 0; g_money_store = g_money_items = g_money_sent_items = -1; }
         g_side_mode = side; g_final_wins = final_wins; g_start_side = start;
         g_goal = goal; g_artifacts_needed = artifacts;
         lstrcpynA(g_seed, seed, sizeof g_seed);
         g_have_slot = 1;
         LeaveCriticalSection(&g_cs);
         rr_log("ap: slot side %d, final mission after %d wins, seed %s", side, final_wins, seed);
+    } else if (!strncmp(line, "ALIEN ", 6)) {
+        rr_alien_item(atoi(line + 6));   /* an Alien Booster item to drop: ALIENUSED once it is on the map */
+    } else if (!strncmp(line, "MONEYSTATE ", 11)) {
+        int m = -1, i = -1;
+        sscanf(line + 11, "%d %d", &m, &i);
+        EnterCriticalSection(&g_cs);
+        if (!g_money_known) {   /* the first one; later ones only echo what we sent */
+            g_money_store = m;
+            g_money_items = i;
+            g_money_sent_items = i;
+            g_money_known = 1;
+            g_money_restore = 1;
+        }
+        LeaveCriticalSection(&g_cs);
+        rr_log("ap: server Money %d, Money items added %d", m, i);
     } else if (!strncmp(line, "ROWS ", 5)) {
         int v[32], n = 0, used = 0;
         const char *q = line + 5;

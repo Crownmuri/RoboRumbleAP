@@ -161,6 +161,20 @@ class RoboRumbleCommandProcessor(CommandProcessor):
         for line in lines:
             Utils.async_start(ctx.game_send(line))
 
+    def _cmd_alien(self, kind: str = "") -> None:
+        """Drop one of your Alien Booster items next to your selected robot: /alien <speed|defense|weapon|intelligence>.
+        Without a name: how many you have."""
+        ctx = self.ctx
+        if not kind:
+            for i, name in enumerate(data.ALIEN_BOOSTERS.values()):
+                self.output(f"{name}: {ctx.aliens_left(i)} left")
+            return
+        kinds = [name.split()[1].lower() for name in data.ALIEN_BOOSTERS.values()]
+        if kind.lower() not in kinds:
+            self.output("Usage: /alien <" + "|".join(kinds) + ">")
+            return
+        self.output(ctx.drop_alien(kinds.index(kind.lower())))
+
     def _cmd_patch(self) -> None:
         """Install the game patch (winmm.dll) into the RoboRumble folder and switch Archipelago on in it."""
         self.ctx.install_patch()
@@ -219,8 +233,39 @@ class RoboRumbleContext(Context):
         self.game_state: Optional[List[int]] = None
         self.shop_texts: Dict[int, Any] = {}   # shop slot -> (flags, "Item for Player")
         self.shop_hinted: Set[int] = set()
-        self.dev_items: List[int] = []         # items given with /dev give (the game counts them too)
+        self.money_state: Optional[Dict[str, int]] = None   # data storage: the campaign's Money, Money items added
+        self.money_loaded = False
+        self.slot_synced = False   # SLOT went to the game on this connection (MONEYSTATE comes after it)
+        self.aliens_used: List[int] = [0, 0, 0, 0]           # data storage: Alien Booster items dropped
+        self.aliens_pending: List[int] = [0, 0, 0, 0]        # sent to the game, not dropped yet
+        self.dev_items: List[int] = []
+        # Universal Tracker: which locations are in logic (shown per mission in the RoboRumble tab)
+        self.locations_in_logic: List[str] = []
+        self.locations_out_of_logic: List[str] = []
+        if tracker_loaded:
+            def in_logic(names: List[str]) -> None:
+                self.locations_in_logic = names
+
+            def out_of_logic(names: List[str]) -> None:
+                self.locations_out_of_logic = names
+
+            self.update_callback = in_logic
+            self.glitches_callback = out_of_logic         # items given with /dev give (the game counts them too)
         self.dev_toggles: Dict[str, bool] = {}   # /dev god etc., sent again when the game reconnects
+
+    def make_gui(self):
+        ui = super().make_gui()
+
+        class RoboRumbleManager(ui):
+            base_title = "Archipelago RoboRumble Client"
+
+            def build(self):
+                container = super().build()
+                from .gui import RoboRumbleTab
+                self.add_client_tab("RoboRumble", RoboRumbleTab(self.ctx))
+                return container
+
+        return RoboRumbleManager
 
     @staticmethod
     def world_settings(key: str, default: Any) -> Any:
@@ -304,9 +349,48 @@ class RoboRumbleContext(Context):
         await self.get_username()
         await self.send_connect()
 
+    # ------------------------------------------------------------ data storage
+    def storage_key(self, what: str) -> str:
+        return f"RoboRumble_{self.team}_{self.slot}_{what}"
+
+    async def load_storage(self) -> None:
+        self.money_loaded = False
+        await self.send_msgs([{"cmd": "Get", "keys": [self.storage_key("money"), self.storage_key("aliens_used")]}])
+
+    async def save_storage(self, what: str, value: Any) -> None:
+        await self.send_msgs([{"cmd": "Set", "key": self.storage_key(what), "default": None, "want_reply": False,
+                               "operations": [{"operation": "replace", "value": value}]}])
+
+    async def send_money_state(self) -> None:
+        if self.money_loaded and self.slot_synced and self.game_writer is not None:
+            money = self.money_state or {}
+            await self.game_send(f"MONEYSTATE {int(money.get('money', -1))} {int(money.get('items', -1))}")
+
+    # ------------------------------------------------------------ alien boosters
+    def aliens_received(self, i: int) -> int:
+        item_id = data.ALIEN_OFFSET + i
+        return sum(1 for item in self.items_received if item.item == item_id)
+
+    def aliens_left(self, i: int) -> int:
+        return self.aliens_received(i) - self.aliens_used[i] - self.aliens_pending[i]
+
+    def drop_alien(self, i: int) -> str:
+        """Asks the game to drop Alien Booster i (0 Speed .. 3 Intelligence); returns what to tell the player."""
+        name = list(data.ALIEN_BOOSTERS.values())[i]
+        if self.aliens_left(i) <= 0:
+            return f"No {name} left."
+        if self.game_writer is None:
+            return "The game is not connected."
+        self.aliens_pending[i] += 1
+        Utils.async_start(self.game_send(f"ALIEN {i + 1}"))
+        in_mission = bool(self.game_state) and self.game_state[0] in (4, 5)
+        return (f"{name}: dropped next to your selected robot." if in_mission
+                else f"{name}: dropped next to one of your robots in the next mission.")
+
     def on_package(self, cmd: str, args: Any) -> None:
         if cmd == "Connected":
             self.slot_data = args.get("slot_data", {})
+            Utils.async_start(self.load_storage())
             Utils.async_start(self.send_msgs([{"cmd": "StatusUpdate",
                                                 "status": CommonClient.ClientStatus.CLIENT_PLAYING}]))
             Utils.async_start(self.sync_game())
@@ -318,6 +402,15 @@ class RoboRumbleContext(Context):
             Utils.async_start(self.send_checked())
         elif cmd == "LocationInfo":
             Utils.async_start(self.shop_labels(args.get("locations", [])))
+        elif cmd == "Retrieved":
+            keys = args.get("keys", {})
+            if self.storage_key("money") in keys:
+                self.money_state = keys[self.storage_key("money")]
+                self.money_loaded = True
+                Utils.async_start(self.send_money_state())
+            used = keys.get(self.storage_key("aliens_used"))
+            if isinstance(used, list) and len(used) == 4:
+                self.aliens_used = [int(v) for v in used]
         super().on_package(cmd, args)
 
     def sides(self) -> List[int]:
@@ -381,6 +474,9 @@ class RoboRumbleContext(Context):
         await self.game_send(f"SLOT {side} {final_wins} {start_side} {seed} {goal} {artifacts}")
         rows = list(self.slot_data.get("rows_heads", range(16))) + list(self.slot_data.get("rows_legs", range(16)))
         await self.game_send("ROWS " + " ".join(str(int(v)) for v in rows))
+        self.slot_synced = True
+        await self.send_money_state()
+        self.aliens_pending = [0, 0, 0, 0]   # a new game process: drops it didn't make are gone
         if self.world_settings("dev_mode", False):
             for name, on in self.dev_toggles.items():
                 await self.game_send(f"DEV SET {DEV_TOGGLES[name]} {int(on)}")
@@ -459,6 +555,7 @@ class RoboRumbleContext(Context):
         cmd, _, rest = line.partition(" ")
         if cmd == "HELLO":
             CommonClient.logger.info(f"Game connected ({rest}).")
+            self.slot_synced = False
             self.items_announced = len(self.items_received)
             await self.sync_game()
         elif cmd == "CHECK" and self.slot:
@@ -475,6 +572,16 @@ class RoboRumbleContext(Context):
             CommonClient.logger.info("Goal reached: the epilogue was watched!")
         elif cmd == "STATE":
             self.game_state = [int(v) for v in rest.split()]
+        elif cmd == "MONEY" and self.slot:
+            money, items = (int(v) for v in rest.split())
+            self.money_state = {"money": money, "items": items}
+            await self.save_storage("money", self.money_state)
+        elif cmd == "ALIENUSED" and self.slot:
+            i = int(rest) - 1
+            if 0 <= i < 4:
+                self.aliens_pending[i] = max(0, self.aliens_pending[i] - 1)
+                self.aliens_used[i] += 1
+                await self.save_storage("aliens_used", self.aliens_used)
         elif cmd == "SHOP" and self.slot:
             await self.shop_opened(int(rest or 0))
 

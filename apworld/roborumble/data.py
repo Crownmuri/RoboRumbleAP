@@ -104,6 +104,16 @@ def money_name(amount: int) -> str:
 
 FILLER: Dict[int, str] = {item_id: money_name(amount) for item_id, amount in MONEY.items()}
 
+# Alien boosters to drop on the map yourself (client: /alien or the RoboRumble tab), next to your selected robot; the
+# robot that drives over it gets it. Order = the game's booster tile types 1-4.
+ALIEN_OFFSET = 5010
+ALIEN_BOOSTERS: Dict[int, str] = {
+    ALIEN_OFFSET + 0: "Alien Speed Booster",          # faster robot
+    ALIEN_OFFSET + 1: "Alien Defense Booster",        # takes a fifth of the damage
+    ALIEN_OFFSET + 2: "Alien Weapon Booster",         # stronger weapon
+    ALIEN_OFFSET + 3: "Alien Intelligence Booster",   # smarter targeting
+}
+
 # Traps hit a random robot of the player during a mission (the patch keeps them until the next mission otherwise).
 TRAP_OFFSET = 5200
 TRAPS: Dict[int, str] = {
@@ -260,6 +270,8 @@ def item_table() -> Dict[str, int]:
     for item_id, name in FILLER.items():
         table[name] = item_id
     for item_id, name in TRAPS.items():
+        table[name] = item_id
+    for item_id, name in ALIEN_BOOSTERS.items():
         table[name] = item_id
     return table
 

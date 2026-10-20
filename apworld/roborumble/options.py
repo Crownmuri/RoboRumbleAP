@@ -161,6 +161,18 @@ class ExtraArtifacts(Range):
     default = 2
 
 
+class AlienBoosterPercentage(Range):
+    """
+    How many of the filler items (after traps) are alien boosters, in percent. You keep them and drop one on the map
+    whenever you like during a mission (client: /alien speed, or the button in the RoboRumble tab); the robot that
+    drives over it gets it. Speed, Defense (a fifth of the damage), Weapon or Intelligence.
+    """
+    display_name = "Alien Booster Percentage"
+    range_start = 0
+    range_end = 100
+    default = 25
+
+
 class TrapPercentage(Range):
     """How many of the filler items are traps, in percent. A trap hits a random robot of yours in the current
     mission (or the next one)."""
@@ -260,6 +272,7 @@ class RoboRumbleOptions(PerGameCommonOptions):
     alien_artifacts: AlienArtifacts
     extra_artifacts: ExtraArtifacts
     trap_percentage: TrapPercentage
+    alien_booster_percentage: AlienBoosterPercentage
     oil_trap_weight: OilTrapWeight
     freeze_trap_weight: FreezeTrapWeight
     disruptor_trap_weight: DisruptorTrapWeight
